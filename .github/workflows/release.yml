@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Agent release
+
+# Push a tag like v0.1.0 to publish signed agent binaries (README: Releases and verification).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub release
+  id-token: write # keyless Sigstore signing + build provenance
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      HAS_CODESIGN_CERT: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - run: go vet ./... && go test ./...
+
+      - name: Build
+        run: VERSION="${GITHUB_REF_NAME#v}" ./scripts/release.sh
+
+      # Optional Authenticode signing of the Windows binaries. Runs only when
+      # the certificate secrets exist; without them the binaries are still
+      # covered by the signed checksums below.
+      - name: Authenticode (optional)
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+        if: env.HAS_CODESIGN_CERT == 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq osslsigncode
+          umask 077
+          echo "$PFX_BASE64" | base64 -d > "$RUNNER_TEMP/cert.pfx"
+          for f in dist/*.exe; do
+            osslsigncode sign -pkcs12 "$RUNNER_TEMP/cert.pfx" -pass "$PFX_PASSWORD" \
+              -n "InfraMole agent" -h sha256 -ts http://timestamp.digicert.com \
+              -in "$f" -out "$f.signed"
+            mv "$f.signed" "$f"
+          done
+          rm -f "$RUNNER_TEMP/cert.pfx"
+
+      - name: Checksums
+        run: cd dist && sha256sum inframole-agent_* > SHA256SUMS && cat SHA256SUMS
+
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign checksums (keyless, Sigstore)
+        run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+
+      - name: Build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/inframole-agent_*
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "InfraMole agent ${GITHUB_REF_NAME#v}" \
+            --notes "Licence: AGPL-3.0-only. Verify: see README, Releases and verification (sha256sum -c SHA256SUMS; cosign verify-blob; gh attestation verify)."

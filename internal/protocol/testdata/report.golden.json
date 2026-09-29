@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "agentVersion": "0.1.0",
+  "collectedAt": "2026-09-28T10:05:00Z",
+  "windowStart": "2026-09-28T10:00:00Z",
+  "host": {
+    "hostname": "APP01",
+    "fqdn": "app01.corp.local",
+    "os": "windows",
+    "osName": "Microsoft Windows Server 2022 Standard",
+    "osVersion": "10.0.20348",
+    "kernelVersion": "10.0.20348",
+    "arch": "amd64",
+    "bootTime": "2026-09-01T06:30:00Z"
+  },
+  "interfaces": [
+    {
+      "name": "Ethernet0",
+      "mac": "00:15:5d:01:02:03",
+      "addresses": [
+        "10.0.0.23/24",
+        "fe80::1/64"
+      ]
+    }
+  ],
+  "services": [
+    {
+      "name": "W3SVC",
+      "displayName": "World Wide Web Publishing Service",
+      "state": "running",
+      "startType": "auto"
+    }
+  ],
+  "listeners": [
+    {
+      "proto": "tcp",
+      "address": "0.0.0.0",
+      "port": 443,
+      "process": {
+        "name": "System",
+        "pid": 4
+      }
+    }
+  ],
+  "connections": [
+    {
+      "proto": "tcp",
+      "direction": "outbound",
+      "localPort": 0,
+      "remoteAddress": "10.0.0.40",
+      "remotePort": 1433,
+      "process": {
+        "name": "w3wp.exe",
+        "path": "C:\\Windows\\System32\\inetsrv\\w3wp.exe"
+      },
+      "count": 10,
+      "firstSeen": "2026-09-28T10:00:00Z",
+      "lastSeen": "2026-09-28T10:04:30Z"
+    },
+    {
+      "proto": "tcp",
+      "direction": "inbound",
+      "localPort": 443,
+      "remoteAddress": "10.0.1.5",
+      "remotePort": 0,
+      "count": 3,
+      "firstSeen": "2026-09-28T10:00:00Z",
+      "lastSeen": "2026-09-28T10:01:00Z"
+    }
+  ],
+  "truncated": true,
+  "inventory": {
+    "source": "proxmox",
+    "collectedAt": "2026-09-28T10:05:00Z",
+    "items": [
+      {
+        "id": "node/pve01",
+        "type": "node",
+        "node": "pve01",
+        "status": "online",
+        "maxmem": 68719476736
+      },
+      {
+        "id": "qemu/100",
+        "type": "qemu",
+        "node": "pve01",
+        "name": "APP01",
+        "vmid": 100,
+        "status": "running",
+        "maxmem": 8589934592
+      },
+      {
+        "id": "qemu/9000",
+        "type": "qemu",
+        "node": "pve01",
+        "name": "tpl-debian",
+        "vmid": 9000,
+        "status": "stopped",
+        "template": 1
+      }
+    ]
+  }
+}

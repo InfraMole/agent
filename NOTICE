@@ -1,0 +1,19 @@
+InfraMole Agent
+Copyright (C) 2026 Alejandro Galisteo
+
+Licensed under the GNU Affero General Public License v3.0 only
+(SPDX-License-Identifier: AGPL-3.0-only). See LICENSE.
+
+The InfraMole name, logo and mascot are trademarks and are not licensed under
+the AGPL. See TRADEMARKS.md.
+
+This software includes third-party components under their own licences:
+
+- github.com/go-ole/go-ole v1.2.6 — MIT
+- github.com/kardianos/service v1.3.0 — Zlib
+- github.com/shirou/gopsutil/v4 v4.26.8 — BSD-3-Clause
+- github.com/tklauser/go-sysconf v0.3.16 — BSD-3-Clause
+- github.com/tklauser/numcpus v0.11.0 — Apache-2.0
+- github.com/yusufpapurcu/wmi v1.2.4 — MIT
+- golang.org/x/sys v0.48.0 — BSD-3-Clause
+- Go standard library — BSD-3-Clause
