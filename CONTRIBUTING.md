@@ -1,7 +1,16 @@
 # Contributing to InfraMole
 
-Thank you for helping! Bug reports, documentation fixes and pull requests are
-welcome.
+> **We are not accepting external code contributions yet.** Our Contributor
+> License Agreement (below) is still under legal review, and we cannot merge
+> code without it. Pull requests from outside the project will be closed
+> without review for now — sorry!
+>
+> What helps a lot today: **issues** — bug reports, questions, ideas and
+> feedback on the documentation. Security problems: see `SECURITY.md`.
+>
+> This notice will be removed once the CLA is final.
+
+Thank you for your interest in InfraMole!
 
 ## Before you open a pull request
 
