@@ -21,6 +21,9 @@ const (
 	MaxListeners       = 500
 	MaxConnections     = 2000
 	MaxInventoryItems  = 2000
+	MaxIISSites        = 200
+	MaxBindingsPerSite = 20
+	MaxSQLDatabases    = 500
 	MaxProcessPathLen  = 1024
 	MaxShortStringLen  = 256
 	MinReportInterval  = 60
@@ -52,7 +55,13 @@ type EnrollResponse struct {
 
 type ReportResponse struct {
 	Config Config `json:"config"`
+	// Features lists the optional report sections the server accepts (M16).
+	// An agent never sends a section the server did not list.
+	Features []string `json:"features,omitempty"`
 }
+
+// FeatureWorkloads: the server accepts Report.Workloads.
+const FeatureWorkloads = "workloads"
 
 type Report struct {
 	SchemaVersion int          `json:"schemaVersion"`
@@ -66,6 +75,34 @@ type Report struct {
 	Connections   []Connection `json:"connections"`
 	Truncated     bool         `json:"truncated,omitempty"`
 	Inventory     *Inventory   `json:"inventory,omitempty"`
+	Workloads     *Workloads   `json:"workloads,omitempty"`
+}
+
+// Workloads (M16): what runs on a Windows host, names only. A nil slice
+// pointer means "not collected"; a pointer to an empty slice means "none".
+type Workloads struct {
+	CollectedAt  time.Time      `json:"collectedAt"`
+	IISSites     *[]IISSite     `json:"iisSites,omitempty"`
+	SQLDatabases *[]SQLDatabase `json:"sqlDatabases,omitempty"`
+}
+
+// IISSite: name and bindings from applicationHost.config. Physical paths,
+// application pools and any credentials in that file are never read.
+type IISSite struct {
+	Name     string       `json:"name"`
+	Bindings []IISBinding `json:"bindings"`
+}
+
+type IISBinding struct {
+	Protocol string `json:"protocol"` // "http" | "https"
+	Port     int    `json:"port"`
+	Host     string `json:"host,omitempty"` // host header; empty = any
+}
+
+// SQLDatabase: a user database name of a local SQL Server instance.
+type SQLDatabase struct {
+	Instance string `json:"instance"` // "MSSQLSERVER" for the default instance
+	Name     string `json:"name"`
 }
 
 // Inventory is the optional output of an agent-side collector (ADR-018 C),

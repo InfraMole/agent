@@ -13,6 +13,7 @@ import (
 	"github.com/InfraMole/agent/internal/config"
 	"github.com/InfraMole/agent/internal/inventory"
 	"github.com/InfraMole/agent/internal/protocol"
+	"github.com/InfraMole/agent/internal/workloads"
 )
 
 type Options struct {
@@ -32,6 +33,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 	}
 	col := collect.NewCollector(opts.Version, log)
 	inv := NewInventory(cfg, log)
+	wl := &serverWorkloads{col: workloads.New(cfg.Collectors, log)}
 	conf := protocol.ClampConfig(protocol.Config{
 		ReportIntervalSec: orDefault(cfg.ReportIntervalSec, protocol.DefaultReportEvery),
 		SampleIntervalSec: orDefault(cfg.SampleIntervalSec, protocol.DefaultSampleEvery),
@@ -53,7 +55,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 
 	// First report right away so the host shows up immediately.
 	col.Sample(ctx)
-	next, err := send(ctx, c, cfg, col, inv, log)
+	next, err := send(ctx, c, cfg, col, inv, wl, log)
 	if errors.Is(err, client.ErrUnauthorized) {
 		return err
 	}
@@ -74,7 +76,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 		case <-sampleT.C:
 			col.Sample(ctx)
 		case <-reportT.C:
-			next, err := send(ctx, c, cfg, col, inv, log)
+			next, err := send(ctx, c, cfg, col, inv, wl, log)
 			var rl *client.RateLimitedError
 			switch {
 			case errors.Is(err, client.ErrUnauthorized):
@@ -115,17 +117,57 @@ func Sample(ctx context.Context, col *collect.Collector, window time.Duration) {
 	}
 }
 
-func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.Collector, inv *Inventory, log *slog.Logger) (*protocol.Config, error) {
+func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.Collector, inv *Inventory, wl *serverWorkloads, log *slog.Logger) (*protocol.Config, error) {
 	report := col.Build(ctx)
 	report.Inventory = inv.Due(ctx, time.Now())
-	next, err := c.Report(ctx, cfg.AgentSecret, report)
-	if err == nil {
-		log.Info("report sent", "connections", len(report.Connections), "listeners", len(report.Listeners),
-			"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil)
-	} else if report.Inventory != nil {
-		inv.Retry() // the inventory was lost with the report
+	report.Workloads = wl.due(ctx, time.Now())
+	res, err := c.Report(ctx, cfg.AgentSecret, report)
+	if err != nil {
+		if report.Inventory != nil {
+			inv.Retry() // the inventory was lost with the report
+		}
+		if report.Workloads != nil {
+			if errors.Is(err, client.ErrRejected) {
+				// Never let workloads block host reports: stop sending them
+				// for this run (the next report goes out without them).
+				wl.accepted, wl.disabled = false, true
+				log.Warn("server rejected the workloads section; not sending it again until restart", "err", err)
+			} else {
+				wl.col.Retry()
+			}
+		}
+		return nil, err
 	}
-	return next, err
+	wl.accepted = !wl.disabled && hasFeature(res.Features, protocol.FeatureWorkloads)
+	log.Info("report sent", "connections", len(report.Connections), "listeners", len(report.Listeners),
+		"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil,
+		"workloads", report.Workloads != nil)
+	return &res.Config, nil
+}
+
+// serverWorkloads sends workloads only once the server has said it accepts
+// them (M16): an older server rejects unknown report fields, so the first
+// report of a run never carries them.
+type serverWorkloads struct {
+	col      *workloads.Collector
+	accepted bool
+	disabled bool // the server rejected them once in this run
+}
+
+func (w *serverWorkloads) due(ctx context.Context, now time.Time) *protocol.Workloads {
+	if w == nil || !w.accepted {
+		return nil
+	}
+	return w.col.Due(ctx, now)
+}
+
+func hasFeature(features []string, name string) bool {
+	for _, f := range features {
+		if f == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Inventory runs the configured collectors on their own (slow) cadence and

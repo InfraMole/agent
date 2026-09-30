@@ -39,17 +39,20 @@ func TestReportSendsBearerAndClampsConfig(t *testing.T) {
 			t.Errorf("bad body: %v", err)
 		}
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"config":{"reportIntervalSec":5,"sampleIntervalSec":30}}`))
+		_, _ = w.Write([]byte(`{"config":{"reportIntervalSec":5,"sampleIntervalSec":30},"features":["workloads"]}`))
 	}))
 	defer srv.Close()
 
 	c, _ := New(srv.URL, true, "test")
-	cfg, err := c.Report(context.Background(), "secret", protocol.Report{SchemaVersion: 1})
+	res, err := c.Report(context.Background(), "secret", protocol.Report{SchemaVersion: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ReportIntervalSec != protocol.MinReportInterval {
-		t.Fatalf("server config not clamped: %+v", cfg)
+	if res.Config.ReportIntervalSec != protocol.MinReportInterval {
+		t.Fatalf("server config not clamped: %+v", res.Config)
+	}
+	if len(res.Features) != 1 || res.Features[0] != protocol.FeatureWorkloads {
+		t.Fatalf("features not decoded: %+v", res.Features)
 	}
 }
 
@@ -114,5 +117,18 @@ func TestServerMessageIsShown(t *testing.T) {
 	_, err = c.Enroll(context.Background(), protocol.EnrollRequest{})
 	if err == nil || err.Error() != "server returned 402: This installation is on 25 of 25 billable nodes." {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRejectedReport(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error":"invalid_report","issues":["workloads: unexpected"]}`))
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, true, "test")
+	_, err := c.Report(context.Background(), "secret", protocol.Report{SchemaVersion: 1})
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("422 must map to ErrRejected, got %v", err)
 	}
 }

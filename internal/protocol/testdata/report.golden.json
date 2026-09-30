@@ -99,5 +99,38 @@
         "template": 1
       }
     ]
+  },
+  "workloads": {
+    "collectedAt": "2026-09-28T10:05:00Z",
+    "iisSites": [
+      {
+        "name": "Portal",
+        "bindings": [
+          {
+            "protocol": "https",
+            "port": 443,
+            "host": "portal.corp.local"
+          },
+          {
+            "protocol": "http",
+            "port": 80
+          }
+        ]
+      },
+      {
+        "name": "Default Web Site",
+        "bindings": []
+      }
+    ],
+    "sqlDatabases": [
+      {
+        "instance": "MSSQLSERVER",
+        "name": "Customers"
+      },
+      {
+        "instance": "REPORTING",
+        "name": "Sales"
+      }
+    ]
   }
 }

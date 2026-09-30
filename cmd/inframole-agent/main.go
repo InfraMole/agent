@@ -27,6 +27,7 @@ import (
 	"github.com/InfraMole/agent/internal/config"
 	"github.com/InfraMole/agent/internal/protocol"
 	"github.com/InfraMole/agent/internal/runner"
+	"github.com/InfraMole/agent/internal/workloads"
 )
 
 // version is set at build time: -ldflags "-X main.version=0.1.0".
@@ -151,6 +152,13 @@ func cmdDryRun(args []string) error {
 	runner.Sample(ctx, col, f.window)
 	report := col.Build(ctx)
 	report.Inventory = inv.Due(ctx, time.Now())
+	// Workloads (IIS sites; SQL Server if enabled in the config) are always
+	// shown here, so you can see them before any server receives them.
+	var collectors *config.Collectors
+	if cfg, err := config.Read(f.configPath); err == nil {
+		collectors = cfg.Collectors
+	}
+	report.Workloads = workloads.New(collectors, log).Due(ctx, time.Now())
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)

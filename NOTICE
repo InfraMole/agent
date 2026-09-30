@@ -10,10 +10,17 @@ the AGPL. See TRADEMARKS.md.
 This software includes third-party components under their own licences:
 
 - github.com/go-ole/go-ole v1.2.6 — MIT
+- github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 — Apache-2.0
+- github.com/golang-sql/sqlexp v0.1.0 — BSD-3-Clause
+- github.com/google/uuid v1.6.0 — BSD-3-Clause
 - github.com/kardianos/service v1.3.0 — Zlib
+- github.com/microsoft/go-mssqldb v1.11.2 — BSD-3-Clause
 - github.com/shirou/gopsutil/v4 v4.26.8 — BSD-3-Clause
+- github.com/shopspring/decimal v1.4.0 — MIT
 - github.com/tklauser/go-sysconf v0.3.16 — BSD-3-Clause
 - github.com/tklauser/numcpus v0.11.0 — Apache-2.0
 - github.com/yusufpapurcu/wmi v1.2.4 — MIT
+- golang.org/x/crypto v0.55.0 — BSD-3-Clause
 - golang.org/x/sys v0.48.0 — BSD-3-Clause
+- golang.org/x/text v0.41.0 — BSD-3-Clause
 - Go standard library — BSD-3-Clause

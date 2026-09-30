@@ -33,6 +33,8 @@ self-update.
 | running services (name, display name, state, start type) | SCM, minimal rights (`SC_MANAGER_ENUMERATE_SERVICE`, `SERVICE_QUERY_CONFIG`) | systemd (no start type)     |
 | listening TCP sockets + owning process name/path         | gopsutil (IP Helper)                                                         | gopsutil (`/proc/net/tcp*`) |
 | established TCP connections, aggregated (see §4)         | same                                                                         | same                        |
+| IIS sites (name, http/https bindings) — M16, §6c         | `applicationHost.config` (sites section only)                                | —                           |
+| SQL Server database names (opt-in) — M16, §6c            | local instances, integrated auth, `sys.databases`                            | —                           |
 
 ### Never collected
 
@@ -160,6 +162,42 @@ command channel). Credentials never leave the machine.
   node HOSTS guest as CONFIRMED (origin DETECTED), idempotent. A guest that
   runs the agent itself is matched to the agent's host by name (its type is
   kept).
+
+### 6c. Windows workloads ✅ M16 (ADR-028)
+
+`internal/workloads`, collected hourly (`collectors.workloads.intervalSec`,
+300–86400) and sent only after the server listed `"workloads"` in the
+`features` of a response (enroll / report): an older server rejects unknown
+report fields, so the first report of a run never carries them. If a report
+with workloads is rejected (422), the agent stops sending them for that run.
+
+- **IIS sites** (default on; `"iis": false` turns it off): parsed from
+  `%windir%\System32\inetsrv\config\applicationHost.config` with a
+  streaming XML decoder that keeps only `sites/site@name` and
+  `bindings/binding@protocol,bindingInformation` for http/https. Paths,
+  pools, identities and encrypted passwords in that file are never decoded
+  (unit test with a fixture full of them).
+- **SQL Server databases** (opt-in: `"sqlServer": true`): instances from
+  `HKLM\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL`;
+  per instance, go-mssqldb (Windows build only: +1.7 MB) connects locally
+  (shared memory / named pipes / loopback, `encrypt=false`,
+  `TrustServerCertificate=true`) with **integrated authentication** as the
+  service identity, and runs only `SELECT name FROM sys.databases WHERE
+database_id > 4`. No credentials are stored. The query was verified
+  against SQL Server 2022 (`go test -tags mssqllive`); integrated auth and
+  instance discovery still need a check on a real Windows SQL Server.
+- A present array is a full snapshot ("none" = `[]`, never `null`); an
+  absent one = not collected (the server leaves that kind alone).
+- Server side: `ingestion.ts#importWorkloads` → importer format
+  `workloads` (`parse-platforms.ts`), one source per kind
+  (`collector:<agentId>:iis|mssql`, reconciled → missing = STALE). Sites →
+  APPLICATION `"<site> (<HOST>)"` with `metadata.ports` and `fqdn` (first
+  binding host); databases → DATABASE `"<db> (<HOST>[\<INSTANCE>])"`; both
+  RUNS_ON the host (CONFIRMED, origin DETECTED); the host is referenced as
+  `id:<resourceId>` (planner resolves only resources of the workspace).
+  Discovery attributes a connection to a host port that exactly one workload
+  listens on to that workload (`plan.ts#attributeToWorkload`), unless the
+  host pair already has a relationship.
 
 ## 7. CLI
 

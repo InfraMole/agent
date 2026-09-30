@@ -26,7 +26,36 @@ type File struct {
 }
 
 type Collectors struct {
-	Proxmox *ProxmoxCollector `json:"proxmox,omitempty"`
+	Proxmox   *ProxmoxCollector   `json:"proxmox,omitempty"`
+	Workloads *WorkloadsCollector `json:"workloads,omitempty"`
+}
+
+// WorkloadsCollector (M16, Windows): IIS sites are reported by default (read
+// from applicationHost.config); SQL Server database names only when
+// sqlServer is true (it connects to the local instances with the service's
+// Windows identity — no credentials are stored).
+type WorkloadsCollector struct {
+	IIS         *bool `json:"iis,omitempty"`         // default true
+	SQLServer   bool  `json:"sqlServer,omitempty"`   // default false
+	IntervalSec int   `json:"intervalSec,omitempty"` // default 3600, min 300
+}
+
+// IISEnabled: on unless explicitly turned off.
+func (c *Collectors) IISEnabled() bool {
+	return c == nil || c.Workloads == nil || c.Workloads.IIS == nil || *c.Workloads.IIS
+}
+
+// SQLServerEnabled: off unless explicitly turned on.
+func (c *Collectors) SQLServerEnabled() bool {
+	return c != nil && c.Workloads != nil && c.Workloads.SQLServer
+}
+
+// WorkloadsInterval clamps the cadence to [5 min, 1 day], default 1 h.
+func (c *Collectors) WorkloadsInterval() time.Duration {
+	if c == nil || c.Workloads == nil {
+		return time.Hour
+	}
+	return ProxmoxCollector{IntervalSec: c.Workloads.IntervalSec}.Interval()
 }
 
 // ProxmoxCollector reads /cluster/resources with a read-only API token

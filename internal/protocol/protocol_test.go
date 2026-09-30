@@ -47,6 +47,14 @@ func GoldenReport() Report {
 				{ID: "qemu/9000", Type: "qemu", Node: "pve01", Name: "tpl-debian", VMID: 9000, Status: "stopped", Template: 1},
 			},
 		},
+		Workloads: &Workloads{
+			CollectedAt: t0.Add(5 * time.Minute),
+			IISSites: &[]IISSite{
+				{Name: "Portal", Bindings: []IISBinding{{Protocol: "https", Port: 443, Host: "portal.corp.local"}, {Protocol: "http", Port: 80}}},
+				{Name: "Default Web Site", Bindings: []IISBinding{}},
+			},
+			SQLDatabases: &[]SQLDatabase{{Instance: "MSSQLSERVER", Name: "Customers"}, {Instance: "REPORTING", Name: "Sales"}},
+		},
 	}
 }
 

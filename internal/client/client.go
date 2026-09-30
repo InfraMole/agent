@@ -23,6 +23,9 @@ import (
 
 var ErrUnauthorized = errors.New("unauthorized: invalid or revoked credential")
 
+// ErrRejected wraps a 422: the server refused the report's content.
+var ErrRejected = errors.New("report rejected by the server")
+
 type RateLimitedError struct{ RetryAfter time.Duration }
 
 func (e *RateLimitedError) Error() string {
@@ -67,13 +70,14 @@ func (c *Client) Enroll(ctx context.Context, req protocol.EnrollRequest) (*proto
 	return &out, nil
 }
 
-func (c *Client) Report(ctx context.Context, secret string, r protocol.Report) (*protocol.Config, error) {
+// Report sends one report. The response's config is already clamped.
+func (c *Client) Report(ctx context.Context, secret string, r protocol.Report) (*protocol.ReportResponse, error) {
 	var out protocol.ReportResponse
 	if err := c.post(ctx, "/api/agent/v1/report", secret, r, &out); err != nil {
 		return nil, err
 	}
-	cfg := protocol.ClampConfig(out.Config)
-	return &cfg, nil
+	out.Config = protocol.ClampConfig(out.Config)
+	return &out, nil
 }
 
 func (c *Client) post(ctx context.Context, path, secret string, body, out any) error {
@@ -122,6 +126,9 @@ func (c *Client) post(ctx context.Context, path, secret string, body, out any) e
 		}
 		if len(snippet) > 300 {
 			snippet = snippet[:300]
+		}
+		if res.StatusCode == http.StatusUnprocessableEntity {
+			return fmt.Errorf("%w (422): %s", ErrRejected, snippet)
 		}
 		return fmt.Errorf("server returned %d: %s", res.StatusCode, snippet)
 	}
