@@ -14,21 +14,30 @@ import (
 // Collector gathers workloads on a slow cadence (default hourly) and hands
 // them to the next report. Nil-safe: nil means "nothing to collect here".
 type Collector struct {
-	iis      bool
-	sql      bool
+	web      bool // IIS on Windows; nginx and Apache on Linux
+	mssql    bool
+	postgres bool
+	mysql    bool
 	interval time.Duration
 	last     time.Time
 	log      *slog.Logger
 }
 
-// New returns nil on hosts without anything to collect (not Windows, or
+// New returns nil on hosts without anything to collect (unsupported OS, or
 // every workload collector disabled in the local config).
 func New(c *config.Collectors, log *slog.Logger) *Collector {
 	if !Supported {
 		return nil
 	}
-	col := &Collector{iis: c.IISEnabled(), sql: c.SQLServerEnabled(), interval: c.WorkloadsInterval(), log: log}
-	if !col.iis && !col.sql {
+	col := &Collector{
+		web:      c.WebServersEnabled(),
+		mssql:    c.SQLServerEnabled() && onWindows,
+		postgres: c.PostgreSQLEnabled() && onLinux,
+		mysql:    c.MySQLEnabled() && onLinux,
+		interval: c.WorkloadsInterval(),
+		log:      log,
+	}
+	if !col.web && !col.mssql && !col.postgres && !col.mysql {
 		return nil
 	}
 	return col
@@ -36,49 +45,81 @@ func New(c *config.Collectors, log *slog.Logger) *Collector {
 
 // Due collects when the interval has elapsed. Each kind is independent: a
 // failure leaves that kind out (the server then keeps what it knew) and is
-// logged locally; it never blocks the host report.
+// logged locally; it never blocks the host report. A kind whose software is
+// not installed is left out too.
 func (c *Collector) Due(ctx context.Context, now time.Time) *protocol.Workloads {
 	if c == nil || (!c.last.IsZero() && now.Sub(c.last) < c.interval) {
 		return nil
 	}
 	c.last = now
 	out := &protocol.Workloads{CollectedAt: now.UTC().Truncate(time.Second)}
-	if c.iis {
-		sites, found, err := iisSites()
-		switch {
-		case err != nil:
-			c.log.Warn("IIS sites not collected", "err", err)
-		case found:
-			if sites == nil {
-				sites = []protocol.IISSite{} // "collected, none" must encode as [], not null
-			}
-			out.IISSites = &sites
-		}
+	if c.web {
+		out.IISSites = c.sites("IIS sites", iisSites)
+		out.NginxSites = c.sites("nginx sites", nginxSites)
+		out.ApacheSites = c.sites("Apache sites", apacheSites)
 	}
-	if c.sql {
-		dbs, err := sqlDatabases(ctx)
-		if err != nil {
-			c.log.Warn("SQL Server databases not collected", "err", err)
-		} else {
-			sort.Slice(dbs, func(i, j int) bool {
-				if dbs[i].Instance != dbs[j].Instance {
-					return dbs[i].Instance < dbs[j].Instance
-				}
-				return dbs[i].Name < dbs[j].Name
-			})
-			if len(dbs) > protocol.MaxSQLDatabases {
-				dbs = dbs[:protocol.MaxSQLDatabases]
-			}
-			if dbs == nil {
-				dbs = []protocol.SQLDatabase{} // "collected, none" must encode as [], not null
-			}
-			out.SQLDatabases = &dbs
-		}
+	if c.mssql {
+		out.SQLDatabases = c.databases(ctx, "SQL Server databases", func(ctx context.Context) ([]protocol.Database, bool, error) {
+			dbs, err := sqlDatabases(ctx)
+			return dbs, true, err
+		})
 	}
-	if out.IISSites == nil && out.SQLDatabases == nil {
+	if c.postgres {
+		out.PostgresDatabases = c.databases(ctx, "PostgreSQL databases", postgresDatabases)
+	}
+	if c.mysql {
+		out.MySQLDatabases = c.databases(ctx, "MySQL databases", mysqlDatabases)
+	}
+	if out.IISSites == nil && out.SQLDatabases == nil && !out.HasLinux() {
 		return nil
 	}
 	return out
+}
+
+func (c *Collector) sites(label string, collect func() ([]protocol.WebSite, bool, error)) *[]protocol.WebSite {
+	sites, found, err := collect()
+	switch {
+	case err != nil:
+		c.log.Warn(label+" not collected", "err", err)
+		return nil
+	case !found:
+		return nil
+	}
+	if sites == nil {
+		sites = []protocol.WebSite{} // "collected, none" must encode as [], not null
+	}
+	if len(sites) > protocol.MaxIISSites {
+		sites = sites[:protocol.MaxIISSites]
+	}
+	return &sites
+}
+
+func (c *Collector) databases(
+	ctx context.Context,
+	label string,
+	collect func(context.Context) ([]protocol.Database, bool, error),
+) *[]protocol.Database {
+	dbs, found, err := collect(ctx)
+	switch {
+	case err != nil:
+		c.log.Warn(label+" not collected", "err", err)
+		return nil
+	case !found:
+		return nil
+	}
+	sort.Slice(dbs, func(i, j int) bool {
+		if dbs[i].Instance != dbs[j].Instance {
+			return dbs[i].Instance < dbs[j].Instance
+		}
+		return dbs[i].Name < dbs[j].Name
+	})
+	if len(dbs) > protocol.MaxSQLDatabases {
+		dbs = dbs[:protocol.MaxSQLDatabases]
+	}
+	if dbs == nil {
+		dbs = []protocol.Database{} // "collected, none" must encode as [], not null
+	}
+	return &dbs
 }
 
 // Retry makes the next report collect again (the last result was lost).

@@ -4,8 +4,9 @@
 [InfraMole](https://inframole.com): one small binary for **Windows** and
 **Linux** (x86-64 and ARM64) that reports host facts, running services,
 listening ports and aggregated TCP connections to your InfraMole server every
-five minutes over HTTPS. On Windows it can also report IIS site names and
-bindings and — only if you enable it locally — SQL Server database names.
+five minutes over HTTPS. It can also report web sites (IIS on Windows,
+nginx and Apache on Linux) and — only if you enable it locally — database
+names (SQL Server, PostgreSQL, MySQL / MariaDB), always without credentials.
 
 **Open source under the [GNU AGPL v3.0 only](LICENSE)** (`AGPL-3.0-only`).
 

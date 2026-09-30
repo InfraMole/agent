@@ -131,6 +131,31 @@
         "instance": "REPORTING",
         "name": "Sales"
       }
+    ],
+    "nginxSites": [
+      {
+        "name": "shop.example.com",
+        "bindings": [
+          {
+            "protocol": "https",
+            "port": 443,
+            "host": "shop.example.com"
+          }
+        ]
+      }
+    ],
+    "apacheSites": [],
+    "postgresDatabases": [
+      {
+        "instance": "5432",
+        "name": "orders"
+      }
+    ],
+    "mysqlDatabases": [
+      {
+        "instance": "default",
+        "name": "wordpress"
+      }
     ]
   }
 }

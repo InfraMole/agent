@@ -60,8 +60,12 @@ type ReportResponse struct {
 	Features []string `json:"features,omitempty"`
 }
 
-// FeatureWorkloads: the server accepts Report.Workloads.
+// FeatureWorkloads: the server accepts Report.Workloads (IIS, SQL Server).
 const FeatureWorkloads = "workloads"
+
+// FeatureWorkloadsLinux: the server also accepts the Linux workload fields
+// (nginx, Apache, PostgreSQL, MySQL — M20).
+const FeatureWorkloadsLinux = "workloads-linux"
 
 type Report struct {
 	SchemaVersion int          `json:"schemaVersion"`
@@ -78,30 +82,41 @@ type Report struct {
 	Workloads     *Workloads   `json:"workloads,omitempty"`
 }
 
-// Workloads (M16): what runs on a Windows host, names only. A nil slice
-// pointer means "not collected"; a pointer to an empty slice means "none".
+// Workloads (M16 Windows, M20 Linux): what runs on a host, names only. A
+// nil slice pointer means "not collected"; a pointer to an empty slice
+// means "none".
 type Workloads struct {
-	CollectedAt  time.Time      `json:"collectedAt"`
-	IISSites     *[]IISSite     `json:"iisSites,omitempty"`
-	SQLDatabases *[]SQLDatabase `json:"sqlDatabases,omitempty"`
+	CollectedAt       time.Time   `json:"collectedAt"`
+	IISSites          *[]WebSite  `json:"iisSites,omitempty"`
+	SQLDatabases      *[]Database `json:"sqlDatabases,omitempty"`
+	NginxSites        *[]WebSite  `json:"nginxSites,omitempty"`
+	ApacheSites       *[]WebSite  `json:"apacheSites,omitempty"`
+	PostgresDatabases *[]Database `json:"postgresDatabases,omitempty"`
+	MySQLDatabases    *[]Database `json:"mysqlDatabases,omitempty"`
 }
 
-// IISSite: name and bindings from applicationHost.config. Physical paths,
-// application pools and any credentials in that file are never read.
-type IISSite struct {
+// HasLinux: any Linux-only field is set (needs FeatureWorkloadsLinux).
+func (w *Workloads) HasLinux() bool {
+	return w != nil && (w.NginxSites != nil || w.ApacheSites != nil || w.PostgresDatabases != nil || w.MySQLDatabases != nil)
+}
+
+// WebSite: an IIS site, nginx server block or Apache virtual host — name and
+// bindings only. Paths, pools, certificates and credentials are never read.
+type WebSite struct {
 	Name     string       `json:"name"`
-	Bindings []IISBinding `json:"bindings"`
+	Bindings []WebBinding `json:"bindings"`
 }
 
-type IISBinding struct {
+type WebBinding struct {
 	Protocol string `json:"protocol"` // "http" | "https"
 	Port     int    `json:"port"`
 	Host     string `json:"host,omitempty"` // host header; empty = any
 }
 
-// SQLDatabase: a user database name of a local SQL Server instance.
-type SQLDatabase struct {
-	Instance string `json:"instance"` // "MSSQLSERVER" for the default instance
+// Database: a user database name of a local engine instance.
+type Database struct {
+	// SQL Server instance ("MSSQLSERVER" = default), PostgreSQL port, MySQL "default".
+	Instance string `json:"instance"`
 	Name     string `json:"name"`
 }
 

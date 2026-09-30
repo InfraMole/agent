@@ -30,19 +30,40 @@ type Collectors struct {
 	Workloads *WorkloadsCollector `json:"workloads,omitempty"`
 }
 
-// WorkloadsCollector (M16, Windows): IIS sites are reported by default (read
-// from applicationHost.config); SQL Server database names only when
-// sqlServer is true (it connects to the local instances with the service's
-// Windows identity — no credentials are stored).
+// WorkloadsCollector (M16 Windows, M20 Linux). Web sites (IIS, nginx,
+// Apache — read from their configuration files) are reported by default.
+// Database names are opt-in: the agent connects to the local instances with
+// its own OS identity (Windows integrated auth, PostgreSQL peer, MySQL
+// unix_socket / auth_socket) — no credentials are ever stored.
 type WorkloadsCollector struct {
-	IIS         *bool `json:"iis,omitempty"`         // default true
-	SQLServer   bool  `json:"sqlServer,omitempty"`   // default false
+	WebServers  *bool `json:"webServers,omitempty"`  // default true (IIS, nginx, Apache)
+	IIS         *bool `json:"iis,omitempty"`         // M16 name; false also turns web sites off on Windows
+	SQLServer   bool  `json:"sqlServer,omitempty"`   // default false (Windows)
+	PostgreSQL  bool  `json:"postgresql,omitempty"`  // default false (Linux)
+	MySQL       bool  `json:"mysql,omitempty"`       // default false (Linux: MySQL and MariaDB)
 	IntervalSec int   `json:"intervalSec,omitempty"` // default 3600, min 300
 }
 
-// IISEnabled: on unless explicitly turned off.
-func (c *Collectors) IISEnabled() bool {
-	return c == nil || c.Workloads == nil || c.Workloads.IIS == nil || *c.Workloads.IIS
+// WebServersEnabled: on unless explicitly turned off ("webServers" or, on
+// configurations written for M16, "iis").
+func (c *Collectors) WebServersEnabled() bool {
+	if c == nil || c.Workloads == nil {
+		return true
+	}
+	w := c.Workloads
+	return (w.WebServers == nil || *w.WebServers) && (w.IIS == nil || *w.IIS)
+}
+
+// IISEnabled is kept for configurations and code written for M16.
+func (c *Collectors) IISEnabled() bool { return c.WebServersEnabled() }
+
+// PostgreSQLEnabled / MySQLEnabled: off unless explicitly turned on.
+func (c *Collectors) PostgreSQLEnabled() bool {
+	return c != nil && c.Workloads != nil && c.Workloads.PostgreSQL
+}
+
+func (c *Collectors) MySQLEnabled() bool {
+	return c != nil && c.Workloads != nil && c.Workloads.MySQL
 }
 
 // SQLServerEnabled: off unless explicitly turned on.

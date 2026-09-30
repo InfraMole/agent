@@ -49,11 +49,17 @@ func GoldenReport() Report {
 		},
 		Workloads: &Workloads{
 			CollectedAt: t0.Add(5 * time.Minute),
-			IISSites: &[]IISSite{
-				{Name: "Portal", Bindings: []IISBinding{{Protocol: "https", Port: 443, Host: "portal.corp.local"}, {Protocol: "http", Port: 80}}},
-				{Name: "Default Web Site", Bindings: []IISBinding{}},
+			IISSites: &[]WebSite{
+				{Name: "Portal", Bindings: []WebBinding{{Protocol: "https", Port: 443, Host: "portal.corp.local"}, {Protocol: "http", Port: 80}}},
+				{Name: "Default Web Site", Bindings: []WebBinding{}},
 			},
-			SQLDatabases: &[]SQLDatabase{{Instance: "MSSQLSERVER", Name: "Customers"}, {Instance: "REPORTING", Name: "Sales"}},
+			SQLDatabases: &[]Database{{Instance: "MSSQLSERVER", Name: "Customers"}, {Instance: "REPORTING", Name: "Sales"}},
+			NginxSites: &[]WebSite{
+				{Name: "shop.example.com", Bindings: []WebBinding{{Protocol: "https", Port: 443, Host: "shop.example.com"}}},
+			},
+			ApacheSites:       &[]WebSite{},
+			PostgresDatabases: &[]Database{{Instance: "5432", Name: "orders"}},
+			MySQLDatabases:    &[]Database{{Instance: "default", Name: "wordpress"}},
 		},
 	}
 }

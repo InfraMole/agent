@@ -139,6 +139,7 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 		return nil, err
 	}
 	wl.accepted = !wl.disabled && hasFeature(res.Features, protocol.FeatureWorkloads)
+	wl.linux = hasFeature(res.Features, protocol.FeatureWorkloadsLinux)
 	log.Info("report sent", "connections", len(report.Connections), "listeners", len(report.Listeners),
 		"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil,
 		"workloads", report.Workloads != nil)
@@ -151,6 +152,7 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 type serverWorkloads struct {
 	col      *workloads.Collector
 	accepted bool
+	linux    bool // the server also accepts the Linux fields (M20)
 	disabled bool // the server rejected them once in this run
 }
 
@@ -158,7 +160,15 @@ func (w *serverWorkloads) due(ctx context.Context, now time.Time) *protocol.Work
 	if w == nil || !w.accepted {
 		return nil
 	}
-	return w.col.Due(ctx, now)
+	out := w.col.Due(ctx, now)
+	if out != nil && !w.linux {
+		// A 0.5–0.7 server knows only the Windows fields.
+		out.NginxSites, out.ApacheSites, out.PostgresDatabases, out.MySQLDatabases = nil, nil, nil, nil
+		if out.IISSites == nil && out.SQLDatabases == nil {
+			return nil
+		}
+	}
+	return out
 }
 
 func hasFeature(features []string, name string) bool {

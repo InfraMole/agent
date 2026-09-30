@@ -18,13 +18,13 @@ import (
 // applicationHost.config. Only the site name and the http/https bindings
 // are kept: every other element and attribute (physicalPath, userName,
 // password, applicationPool, …) is skipped without being decoded.
-func ParseApplicationHost(r io.Reader) ([]protocol.IISSite, error) {
+func ParseApplicationHost(r io.Reader) ([]protocol.WebSite, error) {
 	dec := xml.NewDecoder(r)
 	dec.Strict = false
 	var (
 		path  []string
-		sites []protocol.IISSite
-		cur   *protocol.IISSite
+		sites []protocol.WebSite
+		cur   *protocol.WebSite
 	)
 	inSites := func() bool {
 		n := len(path)
@@ -44,7 +44,7 @@ func ParseApplicationHost(r io.Reader) ([]protocol.IISSite, error) {
 			switch {
 			case name == "site" && inSites():
 				if siteName := attr(t, "name"); siteName != "" && len(sites) < protocol.MaxIISSites {
-					sites = append(sites, protocol.IISSite{Name: clip(siteName, 256), Bindings: []protocol.IISBinding{}})
+					sites = append(sites, protocol.WebSite{Name: clip(siteName, 256), Bindings: []protocol.WebBinding{}})
 					cur = &sites[len(sites)-1]
 				} else {
 					cur = nil
@@ -70,26 +70,26 @@ func ParseApplicationHost(r io.Reader) ([]protocol.IISSite, error) {
 
 // parseBinding: bindingInformation is "ip:port:host" ("*:443:portal.corp.local",
 // "[::1]:80:"); only http and https are reported.
-func parseBinding(proto, info string) (protocol.IISBinding, bool) {
+func parseBinding(proto, info string) (protocol.WebBinding, bool) {
 	proto = strings.ToLower(proto)
 	if proto != "http" && proto != "https" {
-		return protocol.IISBinding{}, false
+		return protocol.WebBinding{}, false
 	}
 	last := strings.LastIndex(info, ":")
 	if last < 0 {
-		return protocol.IISBinding{}, false
+		return protocol.WebBinding{}, false
 	}
 	host := info[last+1:]
 	rest := info[:last]
 	sep := strings.LastIndex(rest, ":")
 	if sep < 0 {
-		return protocol.IISBinding{}, false
+		return protocol.WebBinding{}, false
 	}
 	port, err := strconv.Atoi(rest[sep+1:])
 	if err != nil || port < 1 || port > 65535 {
-		return protocol.IISBinding{}, false
+		return protocol.WebBinding{}, false
 	}
-	return protocol.IISBinding{Protocol: proto, Port: port, Host: clip(strings.ToLower(host), 253)}, true
+	return protocol.WebBinding{Protocol: proto, Port: port, Host: clip(strings.ToLower(host), 253)}, true
 }
 
 func attr(t xml.StartElement, name string) string {

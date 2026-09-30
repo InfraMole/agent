@@ -24,11 +24,23 @@ import (
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
-const Supported = true
+const (
+	Supported = true
+	onWindows = true
+	onLinux   = false
+)
+
+// Linux workloads do not exist on Windows.
+func nginxSites() ([]protocol.WebSite, bool, error)  { return nil, false, nil }
+func apacheSites() ([]protocol.WebSite, bool, error) { return nil, false, nil }
+func postgresDatabases(context.Context) ([]protocol.Database, bool, error) {
+	return nil, false, nil
+}
+func mysqlDatabases(context.Context) ([]protocol.Database, bool, error) { return nil, false, nil }
 
 // iisSites reads %windir%\System32\inetsrv\config\applicationHost.config.
 // found=false when IIS is not installed.
-func iisSites() ([]protocol.IISSite, bool, error) {
+func iisSites() ([]protocol.WebSite, bool, error) {
 	path := filepath.Join(os.Getenv("windir"), "System32", "inetsrv", "config", "applicationHost.config")
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -48,12 +60,12 @@ func iisSites() ([]protocol.IISSite, bool, error) {
 // sqlDatabases lists user database names of every local SQL Server instance,
 // connecting with the service's Windows identity (integrated authentication:
 // no credentials are stored). Only `SELECT name FROM sys.databases` is run.
-func sqlDatabases(ctx context.Context) ([]protocol.SQLDatabase, error) {
+func sqlDatabases(ctx context.Context) ([]protocol.Database, error) {
 	instances, err := sqlInstances()
 	if err != nil {
 		return nil, err
 	}
-	var out []protocol.SQLDatabase
+	var out []protocol.Database
 	var errs []error
 	for _, inst := range instances {
 		names, err := databaseNames(ctx, inst)
@@ -62,7 +74,7 @@ func sqlDatabases(ctx context.Context) ([]protocol.SQLDatabase, error) {
 			continue
 		}
 		for _, n := range names {
-			out = append(out, protocol.SQLDatabase{Instance: clip(inst, 128), Name: clip(n, 128)})
+			out = append(out, protocol.Database{Instance: clip(inst, 128), Name: clip(n, 128)})
 		}
 	}
 	// Report what we could read; fail only when no instance answered.

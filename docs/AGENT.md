@@ -25,16 +25,18 @@ self-update.
 
 ## 3. What is collected
 
-| Data                                                     | Windows                                                                      | Linux                       |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------- |
-| hostname, FQDN, OS name/version, kernel, arch, boot time | gopsutil host + `GetComputerNameEx`                                          | gopsutil host + DNS         |
-| machine id (enrollment only)                             | MachineGuid                                                                  | `/etc/machine-id`           |
-| interfaces (name, MAC, CIDR addresses), loopback skipped | gopsutil                                                                     | gopsutil                    |
-| running services (name, display name, state, start type) | SCM, minimal rights (`SC_MANAGER_ENUMERATE_SERVICE`, `SERVICE_QUERY_CONFIG`) | systemd (no start type)     |
-| listening TCP sockets + owning process name/path         | gopsutil (IP Helper)                                                         | gopsutil (`/proc/net/tcp*`) |
-| established TCP connections, aggregated (see §4)         | same                                                                         | same                        |
-| IIS sites (name, http/https bindings) — M16, §6c         | `applicationHost.config` (sites section only)                                | —                           |
-| SQL Server database names (opt-in) — M16, §6c            | local instances, integrated auth, `sys.databases`                            | —                           |
+| Data                                                     | Windows                                                                      | Linux                            |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------- |
+| hostname, FQDN, OS name/version, kernel, arch, boot time | gopsutil host + `GetComputerNameEx`                                          | gopsutil host + DNS              |
+| machine id (enrollment only)                             | MachineGuid                                                                  | `/etc/machine-id`                |
+| interfaces (name, MAC, CIDR addresses), loopback skipped | gopsutil                                                                     | gopsutil                         |
+| running services (name, display name, state, start type) | SCM, minimal rights (`SC_MANAGER_ENUMERATE_SERVICE`, `SERVICE_QUERY_CONFIG`) | systemd (no start type)          |
+| listening TCP sockets + owning process name/path         | gopsutil (IP Helper)                                                         | gopsutil (`/proc/net/tcp*`)      |
+| established TCP connections, aggregated (see §4)         | same                                                                         | same                             |
+| IIS sites (name, http/https bindings) — M16, §6c         | `applicationHost.config` (sites section only)                                | —                                |
+| SQL Server database names (opt-in) — M16, §6c            | local instances, integrated auth, `sys.databases`                            | —                                |
+| nginx / Apache sites (names, ports) — M20, §6d           | —                                                                            | config files (sites only)        |
+| PostgreSQL / MySQL database names (opt-in) — M20, §6d    | —                                                                            | local socket, peer / socket auth |
 
 ### Never collected
 
@@ -198,6 +200,37 @@ database_id > 4`. No credentials are stored. The query was verified
   Discovery attributes a connection to a host port that exactly one workload
   listens on to that workload (`plan.ts#attributeToWorkload`), unless the
   host pair already has a relationship.
+
+### 6d. Linux workloads ✅ M20 (ADR-031)
+
+Same model as §6c, sent only when the server also lists
+`"workloads-linux"` in `features` (older servers get the Windows fields
+only).
+
+- **nginx** (default on with `webServers`): `ParseNginx` tokenises
+  `/etc/nginx/nginx.conf` and follows `include` globs (≤ 200 files, depth
+  10, 2 MB each); only `server` blocks outside `stream{}` / `mail{}` and in
+  them `listen` / `server_name` (no listen = port 80; unix sockets
+  skipped; `ssl` / `quic` → https). Blocks are merged by their primary name.
+- **Apache**: `ParseApache` on `/etc/apache2/apache2.conf` (Debian) or
+  `/etc/httpd/conf/httpd.conf` (RHEL), following `Include` /
+  `IncludeOptional` from `ServerRoot`; only `<VirtualHost>` addresses,
+  `ServerName`, `ServerAlias`, `SSLEngine`.
+- **PostgreSQL** (opt-in `postgresql`): every `.s.PGSQL.<port>` socket in
+  `/var/run/postgresql`, `/run/postgresql`, `/tmp`; a minimal v3 client
+  (`pgwire.go`, no dependency) starts up as the OS user (peer auth), runs
+  `SELECT datname FROM pg_database WHERE NOT datistemplate` and terminates;
+  any password request → `ErrPasswordRequired`.
+- **MySQL / MariaDB** (opt-in `mysql`): the first socket of
+  `/run/mysqld/mysqld.sock`, `/var/run/mysqld/mysqld.sock`,
+  `/var/lib/mysql/mysql.sock`, `/tmp/mysql.sock`; a minimal client
+  (`mysqlwire.go`) logs in with an empty response and follows an
+  AuthSwitch only to `unix_socket` / `auth_socket`; runs `SHOW DATABASES`.
+- System databases are dropped by the agent (and the server). Verified
+  inside real containers: nginx, ubuntu/apache2, PostgreSQL 17 (peer),
+  MariaDB 11 (unix_socket), MySQL 8.4 (auth_socket; password accounts
+  refused with a clear warning). No new Go dependency (the MySQL driver is
+  MPL-2.0, not allowed).
 
 ## 7. CLI
 

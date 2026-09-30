@@ -14,7 +14,7 @@ import (
 // An empty collection is "none", not "not collected": it must encode as [],
 // never null (the server's schema rejects null).
 func TestEmptyCollectionsEncodeAsArrays(t *testing.T) {
-	c := &Collector{sql: true, interval: time.Hour, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	c := &Collector{mssql: true, interval: time.Hour, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	w := c.Due(context.Background(), time.Now())
 	if !Supported {
 		// Off Windows sqlDatabases() returns nil, nil: still an empty snapshot.
