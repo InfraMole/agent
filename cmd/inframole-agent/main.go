@@ -27,6 +27,7 @@ import (
 	"github.com/InfraMole/agent/internal/config"
 	"github.com/InfraMole/agent/internal/protocol"
 	"github.com/InfraMole/agent/internal/runner"
+	"github.com/InfraMole/agent/internal/update"
 	"github.com/InfraMole/agent/internal/workloads"
 )
 
@@ -45,6 +46,8 @@ Usage:
   inframole-agent install --server URL --token TOKEN  Enroll + install and start the OS service (admin/root).
   inframole-agent uninstall [--keep-config]           Stop and remove the service and its config (admin/root).
   inframole-agent status                              Show enrollment and service status.
+  inframole-agent update  [--check]                   Install the newest signed release now (admin/root);
+                                                   --check only reports whether one exists.
   inframole-agent version
 
 Common flags:
@@ -77,6 +80,8 @@ func main() {
 		err = cmdUninstall(args)
 	case "status":
 		err = cmdStatus(args)
+	case "update":
+		err = cmdUpdate(args)
 	case "help", "--help", "-h":
 		fmt.Printf(usage, config.DefaultPath())
 	default:
@@ -98,6 +103,7 @@ type commonFlags struct {
 	once        bool
 	keepConfig  bool
 	inventory   bool
+	check       bool
 }
 
 func parse(name string, args []string, extra func(*flag.FlagSet, *commonFlags)) (*commonFlags, error) {
@@ -336,6 +342,11 @@ func (p *program) Start(service.Service) error {
 	go func() {
 		defer close(p.done)
 		err := runner.Run(ctx, p.cfg, p.opts, p.log)
+		if errors.Is(err, runner.ErrRestart) {
+			// Exit non-zero: the service manager starts the new (or restored) binary.
+			p.log.Info("exiting so the service manager restarts the agent")
+			os.Exit(1)
+		}
 		if errors.Is(err, client.ErrUnauthorized) {
 			// Stay up but idle: exiting would make the service manager restart us in a loop.
 			p.log.Error("credential rejected by the server (agent revoked?). Idle until re-enrolled and restarted.")
@@ -367,6 +378,9 @@ func newService(configPath string, prg *program) (service.Service, error) {
 		DisplayName: "InfraMole Agent",
 		Description: "Read-only discovery agent for InfraMole: reports host facts, running services, listening ports and TCP connections. No remote commands.",
 		Arguments:   []string{"run", "--config", configPath},
+		// Windows: restart when the process exits after a self-update (M22).
+		// systemd units already have Restart=always.
+		Option: service.KeyValue{"OnFailure": "restart", "OnFailureDelayDuration": "10s"},
 	})
 }
 
@@ -407,4 +421,50 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// cmdUpdate installs the newest signed release now (M22). Like the automatic
+// check, it only trusts manifests signed with the compiled-in key.
+func cmdUpdate(args []string) error {
+	f, err := parse("update", args, func(fs *flag.FlagSet, f *commonFlags) {
+		fs.BoolVar(&f.check, "check", false, "only report whether a newer release exists")
+	})
+	if err != nil {
+		return err
+	}
+	baseURL := ""
+	if cfg, err := config.Read(f.configPath); err == nil {
+		baseURL = cfg.UpdateBaseURL
+	}
+	u, err := update.New(baseURL, version)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	plan, err := u.Check(ctx)
+	if err != nil {
+		return err
+	}
+	if plan == nil {
+		fmt.Printf("inframole-agent %s is up to date.\n", version)
+		return nil
+	}
+	if f.check {
+		fmt.Printf("Update available: %s → %s (run: inframole-agent update)\n", version, plan.Version)
+		return nil
+	}
+	if err := u.Apply(ctx, plan); err != nil {
+		return err
+	}
+	fmt.Printf("Installed %s (the previous binary is kept until the new one reports).\n", plan.Version)
+	if s, err := newService(f.configPath, nil); err == nil {
+		if st, err := s.Status(); err == nil && st == service.StatusRunning {
+			if err := s.Restart(); err != nil {
+				return fmt.Errorf("restart the service to use the new version: %w", err)
+			}
+			fmt.Println("Service restarted.")
+		}
+	}
+	return nil
 }

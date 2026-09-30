@@ -27,7 +27,11 @@ commands it shows. Step by step, including proxies and Proxmox:
 
 Every [release](https://github.com/InfraMole/agent/releases) contains the
 binaries, `SHA256SUMS`, a keyless **Sigstore** signature of the checksums
-(`SHA256SUMS.sigstore.json`) and a GitHub build-provenance attestation. The
+(`SHA256SUMS.sigstore.json`), a GitHub build-provenance attestation and
+`manifest.json` + `manifest.json.sig`: the release version and binary hashes,
+signed with the Ed25519 key whose public half is compiled into the agent
+(`internal/update/keys.go`). The agent's opt-in self-update (`"autoUpdate":
+true`) installs only releases whose manifest verifies against that key. The
 builds are reproducible.
 
 ```sh

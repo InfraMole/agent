@@ -50,6 +50,32 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum inframole-agent_* > SHA256SUMS && cat SHA256SUMS
 
+      # Self-update (ADR-033): agents only install a release whose manifest is
+      # signed with the Ed25519 key compiled into them. Without the secret
+      # (e.g. a fork) no manifest is published and agents do not update to it.
+      - name: Signed update manifest
+        env:
+          UPDATE_KEY: ${{ secrets.AGENT_UPDATE_SIGNING_KEY }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          if [ -z "$UPDATE_KEY" ]; then
+            echo "::warning::AGENT_UPDATE_SIGNING_KEY is not set: agents will not self-update to this release"
+            exit 0
+          fi
+          python3 - <<'EOF'
+          import glob, hashlib, json, os
+          files = {os.path.basename(f): hashlib.sha256(open(f, "rb").read()).hexdigest()
+                   for f in sorted(glob.glob("dist/inframole-agent_*"))}
+          manifest = {"version": os.environ["VERSION"].removeprefix("v"), "files": files}
+          with open("dist/manifest.json", "w") as out:
+              json.dump(manifest, out, sort_keys=True, separators=(",", ":"))
+          EOF
+          umask 077
+          printf '%s\n' "$UPDATE_KEY" > "$RUNNER_TEMP/update.pem"
+          openssl pkeyutl -sign -inkey "$RUNNER_TEMP/update.pem" -rawin -in dist/manifest.json -out dist/manifest.json.sig
+          rm -f "$RUNNER_TEMP/update.pem"
+          cat dist/manifest.json
+
       - uses: sigstore/cosign-installer@v3
       - name: Sign checksums (keyless, Sigstore)
         run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS

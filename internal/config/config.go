@@ -23,6 +23,11 @@ type File struct {
 	// Collectors are set only by editing this file locally; the server can
 	// never enable or change them (ADR-018 C).
 	Collectors *Collectors `json:"collectors,omitempty"`
+	// AutoUpdate (M22, ADR-033): install newer signed releases on its own.
+	// Local only — the server cannot turn it on or choose where updates come from.
+	AutoUpdate bool `json:"autoUpdate,omitempty"`
+	// UpdateBaseURL: a local mirror of the release files (default: GitHub releases).
+	UpdateBaseURL string `json:"updateBaseUrl,omitempty"`
 }
 
 type Collectors struct {

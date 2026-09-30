@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/InfraMole/agent/internal/client"
@@ -13,8 +14,13 @@ import (
 	"github.com/InfraMole/agent/internal/config"
 	"github.com/InfraMole/agent/internal/inventory"
 	"github.com/InfraMole/agent/internal/protocol"
+	"github.com/InfraMole/agent/internal/update"
 	"github.com/InfraMole/agent/internal/workloads"
 )
+
+// ErrRestart asks the caller to exit so the service manager starts the
+// (new or restored) binary: after a self-update or an update rollback.
+var ErrRestart = errors.New("restart required")
 
 type Options struct {
 	ConfigPath string
@@ -51,13 +57,28 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 	}
 
 	log.Info("agent started", "server", cfg.Server, "agentId", cfg.AgentID,
-		"reportEvery", conf.ReportIntervalSec, "sampleEvery", conf.SampleIntervalSec)
+		"reportEvery", conf.ReportIntervalSec, "sampleEvery", conf.SampleIntervalSec, "version", opts.Version)
+
+	// M22: a freshly updated binary that keeps failing is rolled back here.
+	exe, _ := os.Executable()
+	if rolled, err := update.OnStart(exe); err != nil {
+		log.Warn("update state", "err", err)
+	} else if rolled {
+		log.Error("the updated agent never reported successfully; the previous version was restored")
+		return ErrRestart
+	}
+	confirmed := false
+	updates := newAutoUpdater(cfg, opts.Version, log)
 
 	// First report right away so the host shows up immediately.
 	col.Sample(ctx)
 	next, err := send(ctx, c, cfg, col, inv, wl, log)
 	if errors.Is(err, client.ErrUnauthorized) {
 		return err
+	}
+	if err == nil {
+		update.Confirm(exe)
+		confirmed = true
 	}
 	if next != nil && *next != conf {
 		conf = apply(cfg, opts.ConfigPath, *next, log)
@@ -73,6 +94,10 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 		case <-ctx.Done():
 			log.Info("agent stopping")
 			return nil
+		case <-updates.timer():
+			if updates.run(ctx) {
+				return ErrRestart
+			}
 		case <-sampleT.C:
 			col.Sample(ctx)
 		case <-reportT.C:
@@ -87,6 +112,16 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 			case err != nil:
 				// The window is dropped; the next report covers a new window.
 				log.Warn("report failed", "err", err)
+			case !confirmed:
+				update.Confirm(exe)
+				confirmed = true
+				if next != nil && *next != conf {
+					conf = apply(cfg, opts.ConfigPath, *next, log)
+					sampleT.Reset(time.Duration(conf.SampleIntervalSec) * time.Second)
+					reportT.Reset(time.Duration(conf.ReportIntervalSec) * time.Second)
+				} else {
+					reportT.Reset(time.Duration(conf.ReportIntervalSec) * time.Second)
+				}
 			case next != nil && *next != conf:
 				conf = apply(cfg, opts.ConfigPath, *next, log)
 				sampleT.Reset(time.Duration(conf.SampleIntervalSec) * time.Second)

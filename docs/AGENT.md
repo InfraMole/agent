@@ -232,6 +232,25 @@ only).
   refused with a clear warning). No new Go dependency (the MySQL driver is
   MPL-2.0, not allowed).
 
+### 6e. Self-update ✅ M22 (ADR-033)
+
+Opt-in: `"autoUpdate": true` in `agent.json` (optional `"updateBaseUrl"`,
+https, for a mirror). About every 24 h (first check 10–70 min after start,
+jitter ± 1 h) the agent fetches `manifest.json` + `manifest.json.sig` from
+the release location, verifies the Ed25519 signature against the keys in
+`internal/update/keys.go`, requires a strictly newer `x.y.z` (dev builds
+never update), downloads its platform's binary (≤ 64 MB, redirects only
+https), checks the SHA-256, runs `<new> version`, keeps the current binary
+as `<exe>.previous`, swaps (rename; allowed for a running binary on Linux
+and Windows), writes `<exe>.update.json` and exits non-zero so the service
+manager restarts it (systemd `Restart=always`; Windows services get restart
+recovery actions — set at install since M22 and fixed in place by the
+updater for older installs). On start, `update.OnStart` counts attempts; the
+first successful report `Confirm`s (removes the backup); after 3 starts
+without a report the previous binary is restored. `inframole-agent update
+[--check]` does the same on demand and restarts the service. The server is
+not involved at any point.
+
 ## 7. CLI
 
 ```
@@ -240,6 +259,7 @@ inframole-agent enroll  --server URL --token TOKEN  # or INFRAMOLE_ENROLLMENT_TO
 inframole-agent run [--once] [--window 10s]         # foreground (service mode auto-detected)
 inframole-agent install --server URL --token TOKEN  # enroll + install + start service
 inframole-agent uninstall [--keep-config]
+inframole-agent update [--check]                    # self-update now (M22)
 inframole-agent status | version
 ```
 
