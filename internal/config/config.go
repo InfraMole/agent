@@ -31,8 +31,43 @@ type File struct {
 }
 
 type Collectors struct {
-	Proxmox   *ProxmoxCollector   `json:"proxmox,omitempty"`
-	Workloads *WorkloadsCollector `json:"workloads,omitempty"`
+	Proxmox      *ProxmoxCollector      `json:"proxmox,omitempty"`
+	VCenter      *VCenterCollector      `json:"vcenter,omitempty"`
+	XenOrchestra *XenOrchestraCollector `json:"xenOrchestra,omitempty"`
+	HyperV       *HyperVCollector       `json:"hyperv,omitempty"`
+	Workloads    *WorkloadsCollector    `json:"workloads,omitempty"`
+}
+
+// VCenterCollector (M24) reads hosts and VMs from vCenter or a standalone
+// ESXi host with a read-only user. The password lives in its own file.
+type VCenterCollector struct {
+	URL                string `json:"url"`          // https://vcenter.corp.local
+	Username           string `json:"username"`     // e.g. inframole@vsphere.local (Read-only role)
+	PasswordFile       string `json:"passwordFile"` // the password, nothing else
+	CAFile             string `json:"caFile,omitempty"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
+	IntervalSec        int    `json:"intervalSec,omitempty"` // default 3600, min 300
+}
+
+// XenOrchestraCollector (M24) reads XCP-ng hosts and VMs from Xen
+// Orchestra's REST API with an authentication token of a read-only user.
+type XenOrchestraCollector struct {
+	URL                string `json:"url"`       // https://xo.corp.local
+	TokenFile          string `json:"tokenFile"` // the token, nothing else
+	CAFile             string `json:"caFile,omitempty"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
+	IntervalSec        int    `json:"intervalSec,omitempty"` // default 3600, min 300
+}
+
+// HyperVCollector (M24, Windows): the VMs of the local Hyper-V host. Present
+// (even empty: {}) = enabled.
+type HyperVCollector struct {
+	IntervalSec int `json:"intervalSec,omitempty"` // default 3600, min 300
+}
+
+// ClampInterval clamps a collector cadence to [5 min, 1 day], default 1 h.
+func ClampInterval(sec int) time.Duration {
+	return ProxmoxCollector{IntervalSec: sec}.Interval()
 }
 
 // WorkloadsCollector (M16 Windows, M20 Linux). Web sites (IIS, nginx,

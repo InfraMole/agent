@@ -155,11 +155,20 @@ func Sample(ctx context.Context, col *collect.Collector, window time.Duration) {
 func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.Collector, inv *Inventory, wl *serverWorkloads, log *slog.Logger) (*protocol.Config, error) {
 	report := col.Build(ctx)
 	report.Inventory = inv.Due(ctx, time.Now())
+	report.Hypervisors = inv.DueHypervisors(ctx, time.Now(), false)
 	report.Workloads = wl.due(ctx, time.Now())
 	res, err := c.Report(ctx, cfg.AgentSecret, report)
 	if err != nil {
 		if report.Inventory != nil {
 			inv.Retry() // the inventory was lost with the report
+		}
+		if len(report.Hypervisors) > 0 {
+			if errors.Is(err, client.ErrRejected) {
+				inv.hvDisabled = true
+				log.Warn("server rejected the hypervisors section; not sending it again until restart", "err", err)
+			} else {
+				inv.RetryHypervisors(report.Hypervisors)
+			}
 		}
 		if report.Workloads != nil {
 			if errors.Is(err, client.ErrRejected) {
@@ -175,8 +184,9 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	}
 	wl.accepted = !wl.disabled && hasFeature(res.Features, protocol.FeatureWorkloads)
 	wl.linux = hasFeature(res.Features, protocol.FeatureWorkloadsLinux)
+	inv.negotiated(res.Features)
 	log.Info("report sent", "connections", len(report.Connections), "listeners", len(report.Listeners),
-		"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil,
+		"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil, "hypervisors", len(report.Hypervisors),
 		"workloads", report.Workloads != nil)
 	return &res.Config, nil
 }
@@ -221,26 +231,66 @@ type Inventory struct {
 	proxmox  *inventory.Proxmox
 	interval time.Duration
 	last     time.Time
-	log      *slog.Logger
+	// M24: hypervisor collectors, sent only once the server lists
+	// "hypervisors" in its features (an older server rejects the field).
+	hypervisors []*hypervisorCollector
+	hvAccepted  bool
+	hvDisabled  bool // the server rejected the section once in this run
+	log         *slog.Logger
+}
+
+type hypervisorCollector struct {
+	source   string
+	collect  func(context.Context) (*protocol.Hypervisor, error)
+	interval time.Duration
+	last     time.Time
 }
 
 func NewInventory(cfg *config.File, log *slog.Logger) *Inventory {
-	if cfg.Collectors == nil || cfg.Collectors.Proxmox == nil {
+	c := cfg.Collectors
+	if c == nil {
 		return nil
 	}
-	p, err := inventory.NewProxmox(*cfg.Collectors.Proxmox)
-	if err != nil {
-		log.Warn("proxmox collector disabled", "err", err)
+	inv := &Inventory{log: log}
+	if c.Proxmox != nil {
+		if p, err := inventory.NewProxmox(*c.Proxmox); err != nil {
+			log.Warn("proxmox collector disabled", "err", err)
+		} else {
+			log.Info("proxmox collector enabled", "every", c.Proxmox.Interval())
+			inv.proxmox, inv.interval = p, c.Proxmox.Interval()
+		}
+	}
+	add := func(source string, every int, collect func(context.Context) (*protocol.Hypervisor, error), err error) {
+		if err != nil {
+			log.Warn(source+" collector disabled", "err", err)
+			return
+		}
+		interval := config.ClampInterval(every)
+		log.Info(source+" collector enabled", "every", interval)
+		inv.hypervisors = append(inv.hypervisors, &hypervisorCollector{source: source, collect: collect, interval: interval})
+	}
+	if c.VCenter != nil {
+		v, err := inventory.NewVCenter(*c.VCenter)
+		add("vcenter", c.VCenter.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return v.Collect(ctx) }, err)
+	}
+	if c.XenOrchestra != nil {
+		x, err := inventory.NewXenOrchestra(*c.XenOrchestra)
+		add("xenorchestra", c.XenOrchestra.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return x.Collect(ctx) }, err)
+	}
+	if c.HyperV != nil {
+		h, err := inventory.NewHyperV()
+		add("hyperv", c.HyperV.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return h.Collect(ctx) }, err)
+	}
+	if inv.proxmox == nil && len(inv.hypervisors) == 0 {
 		return nil
 	}
-	log.Info("proxmox collector enabled", "every", cfg.Collectors.Proxmox.Interval())
-	return &Inventory{proxmox: p, interval: cfg.Collectors.Proxmox.Interval(), log: log}
+	return inv
 }
 
 // Due collects when the interval has elapsed. Failures are logged and retried
 // at the next interval (they never block the host report).
 func (i *Inventory) Due(ctx context.Context, now time.Time) *protocol.Inventory {
-	if i == nil || (!i.last.IsZero() && now.Sub(i.last) < i.interval) {
+	if i == nil || i.proxmox == nil || (!i.last.IsZero() && now.Sub(i.last) < i.interval) {
 		return nil
 	}
 	i.last = now
@@ -255,6 +305,49 @@ func (i *Inventory) Due(ctx context.Context, now time.Time) *protocol.Inventory 
 func (i *Inventory) Retry() {
 	if i != nil {
 		i.last = time.Time{}
+	}
+}
+
+// DueHypervisors runs the hypervisor collectors whose interval has elapsed.
+// force: dry-run (no server to negotiate with).
+func (i *Inventory) DueHypervisors(ctx context.Context, now time.Time, force bool) []protocol.Hypervisor {
+	if i == nil || (!force && (!i.hvAccepted || i.hvDisabled)) {
+		return nil
+	}
+	var out []protocol.Hypervisor
+	for _, h := range i.hypervisors {
+		if !h.last.IsZero() && now.Sub(h.last) < h.interval {
+			continue
+		}
+		h.last = now
+		inv, err := h.collect(ctx)
+		if err != nil {
+			i.log.Warn(h.source+" inventory failed", "err", err)
+			continue
+		}
+		out = append(out, *inv)
+	}
+	return out
+}
+
+// RetryHypervisors: the collections were lost with a failed report.
+func (i *Inventory) RetryHypervisors(sent []protocol.Hypervisor) {
+	if i == nil {
+		return
+	}
+	for _, s := range sent {
+		for _, h := range i.hypervisors {
+			if h.source == s.Source {
+				h.last = time.Time{}
+			}
+		}
+	}
+}
+
+// negotiated records what the server accepts (from the report response).
+func (i *Inventory) negotiated(features []string) {
+	if i != nil {
+		i.hvAccepted = hasFeature(features, protocol.FeatureHypervisors)
 	}
 }
 

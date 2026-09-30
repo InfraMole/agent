@@ -165,6 +165,44 @@ command channel). Credentials never leave the machine.
   runs the agent itself is matched to the agent's host by name (its type is
   kept).
 
+### 6d. Hypervisor collectors ✅ M24 (ADR-035)
+
+Same rules as §6b (local config only, credentials in private files that
+never leave the machine, https only, `caFile` / local-only
+`insecureSkipVerify`, redirects never followed, 16 MB cap, `intervalSec`
+300–86400 default 3600). Report field `hypervisors[]` — one full snapshot
+per platform `{source, collectedAt, hosts[], vms[]}` — sent only after the
+server listed `"hypervisors"` in `features`; a 422 stops it for the run.
+
+- **vCenter / ESXi** (`collectors.vcenter`: `url`, `username`,
+  `passwordFile`): hand-written minimal vSphere SOAP client
+  (`internal/inventory/vcenter.go`): RetrieveServiceContent, Login,
+  CreateContainerView (HostSystem, VirtualMachine, ClusterComputeResource),
+  RetrievePropertiesEx (+ Continue…), DestroyView, Logout. Properties:
+  host `name, parent, summary.runtime.connectionState,
+summary.config.product.fullName`; VM `name, config.template,
+config.guestFullName, config.hardware.numCPU, config.hardware.memoryMB,
+runtime.host, runtime.powerState, guest.hostName, guest.ipAddress,
+guest.net`. govmomi is a **test-only** dependency (its simulator); linking
+  it would add ~7 MB. Login faults are never echoed (password safety).
+  Verified with the release binary against the `vmware/vcsim` container.
+- **Xen Orchestra** (`collectors.xenOrchestra`: `url`, `tokenFile`): REST
+  `/rest/v0/{pools,hosts,vms}?fields=…` with the `authenticationToken`
+  cookie. A VM's `$container` is its host only when it is a known host
+  (halted VMs sit on the pool: no placement). Fixture-tested only.
+- **Hyper-V** (`collectors.hyperv: {}`, Windows): runs a fixed read-only
+  script (`Get-VM`, full path to Windows PowerShell, nothing interpolated;
+  a test forbids mutating verbs). No hosts; the server attaches the VMs to
+  the agent's own host. Parser tested; the real cmdlet is untested (no
+  Hyper-V on the dev machine) — Preview.
+- Guest IPs: unique, parseable, not loopback / link-local / multicast, max
+  16 per VM.
+- Server: `ingestion.ts#importHypervisor` → importer format `hypervisor`
+  (`parse-platforms.ts`), source `collector:<agentId>:<platform>`,
+  reconciled. Hosts → SERVER, VMs → VM, host HOSTS VM (CONFIRMED, origin
+  DETECTED), templates skipped. The planner matches a VM to an agent's
+  SERVER host by VM name **or guest host name (short form)**.
+
 ### 6c. Windows workloads ✅ M16 (ADR-028)
 
 `internal/workloads`, collected hourly (`collectors.workloads.intervalSec`,

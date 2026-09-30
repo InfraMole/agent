@@ -47,6 +47,21 @@ func GoldenReport() Report {
 				{ID: "qemu/9000", Type: "qemu", Node: "pve01", Name: "tpl-debian", VMID: 9000, Status: "stopped", Template: 1},
 			},
 		},
+		Hypervisors: []Hypervisor{
+			{
+				Source: "vcenter", CollectedAt: t0.Add(5 * time.Minute),
+				Hosts: []HypervisorHost{{ID: "host-21", Name: "esx01.corp.local", Cluster: "Prod", Status: "connected", Version: "VMware ESXi 8.0.3"}},
+				VMs: []VM{
+					{ID: "vm-42", Name: "APP01", Host: "host-21", Status: "poweredOn", CPUs: 4, MemoryMB: 8192,
+						OS: "Microsoft Windows Server 2022 (64-bit)", Hostname: "app01.corp.local", IPs: []string{"10.0.0.23", "fe80::1"}},
+					{ID: "vm-7", Name: "tpl-win2022", Host: "host-21", Status: "poweredOff", Template: true},
+				},
+			},
+			{
+				Source: "hyperv", CollectedAt: t0.Add(5 * time.Minute), Hosts: []HypervisorHost{},
+				VMs: []VM{{ID: "3f2a6c1e-8a55-4c55-9b1f-2d9a2b0f7c11", Name: "DC01", Status: "Running", CPUs: 2, MemoryMB: 4096, IPs: []string{"10.0.0.10"}}},
+			},
+		},
 		Workloads: &Workloads{
 			CollectedAt: t0.Add(5 * time.Minute),
 			IISSites: &[]WebSite{

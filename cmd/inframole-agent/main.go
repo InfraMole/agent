@@ -158,6 +158,7 @@ func cmdDryRun(args []string) error {
 	runner.Sample(ctx, col, f.window)
 	report := col.Build(ctx)
 	report.Inventory = inv.Due(ctx, time.Now())
+	report.Hypervisors = inv.DueHypervisors(ctx, time.Now(), true)
 	// Workloads (IIS sites; SQL Server if enabled in the config) are always
 	// shown here, so you can see them before any server receives them.
 	var collectors *config.Collectors

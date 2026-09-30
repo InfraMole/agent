@@ -83,7 +83,7 @@ func readTokenFile(path string) (string, error) {
 		return "", errors.New("proxmox: tokenFile is required")
 	}
 	if err := checkPrivate(path); err != nil {
-		return "", err
+		return "", fmt.Errorf("proxmox: tokenFile: %w", err)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {

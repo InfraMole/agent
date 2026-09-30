@@ -67,6 +67,15 @@ const FeatureWorkloads = "workloads"
 // (nginx, Apache, PostgreSQL, MySQL — M20).
 const FeatureWorkloadsLinux = "workloads-linux"
 
+// FeatureHypervisors: the server accepts Report.Hypervisors (M24).
+const FeatureHypervisors = "hypervisors"
+
+// Hypervisor limits enforced by the server.
+const (
+	MaxHypervisorHosts = 500
+	MaxVMIPs           = 16
+)
+
 type Report struct {
 	SchemaVersion int          `json:"schemaVersion"`
 	AgentVersion  string       `json:"agentVersion"`
@@ -79,7 +88,40 @@ type Report struct {
 	Connections   []Connection `json:"connections"`
 	Truncated     bool         `json:"truncated,omitempty"`
 	Inventory     *Inventory   `json:"inventory,omitempty"`
+	Hypervisors   []Hypervisor `json:"hypervisors,omitempty"`
 	Workloads     *Workloads   `json:"workloads,omitempty"`
+}
+
+// Hypervisor is one agent-side hypervisor collection (M24): hosts and VMs of
+// vCenter / ESXi, Hyper-V (this host; no hosts, VMs without Host) or Xen
+// Orchestra. A full snapshot of that platform.
+type Hypervisor struct {
+	Source      string           `json:"source"` // "vcenter" | "hyperv" | "xenorchestra"
+	CollectedAt time.Time        `json:"collectedAt"`
+	Hosts       []HypervisorHost `json:"hosts"`
+	VMs         []VM             `json:"vms"`
+}
+
+type HypervisorHost struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Cluster string `json:"cluster,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Version string `json:"version,omitempty"`
+}
+
+// VM: names, placement, size and guest IPs only.
+type VM struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Host     string   `json:"host,omitempty"`
+	Status   string   `json:"status,omitempty"`
+	CPUs     int      `json:"cpus,omitempty"`
+	MemoryMB int      `json:"memoryMb,omitempty"`
+	OS       string   `json:"os,omitempty"`
+	Hostname string   `json:"hostname,omitempty"`
+	IPs      []string `json:"ips,omitempty"`
+	Template bool     `json:"template,omitempty"`
 }
 
 // Workloads (M16 Windows, M20 Linux): what runs on a host, names only. A

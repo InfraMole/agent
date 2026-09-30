@@ -100,6 +100,61 @@
       }
     ]
   },
+  "hypervisors": [
+    {
+      "source": "vcenter",
+      "collectedAt": "2026-09-28T10:05:00Z",
+      "hosts": [
+        {
+          "id": "host-21",
+          "name": "esx01.corp.local",
+          "cluster": "Prod",
+          "status": "connected",
+          "version": "VMware ESXi 8.0.3"
+        }
+      ],
+      "vms": [
+        {
+          "id": "vm-42",
+          "name": "APP01",
+          "host": "host-21",
+          "status": "poweredOn",
+          "cpus": 4,
+          "memoryMb": 8192,
+          "os": "Microsoft Windows Server 2022 (64-bit)",
+          "hostname": "app01.corp.local",
+          "ips": [
+            "10.0.0.23",
+            "fe80::1"
+          ]
+        },
+        {
+          "id": "vm-7",
+          "name": "tpl-win2022",
+          "host": "host-21",
+          "status": "poweredOff",
+          "template": true
+        }
+      ]
+    },
+    {
+      "source": "hyperv",
+      "collectedAt": "2026-09-28T10:05:00Z",
+      "hosts": [],
+      "vms": [
+        {
+          "id": "3f2a6c1e-8a55-4c55-9b1f-2d9a2b0f7c11",
+          "name": "DC01",
+          "status": "Running",
+          "cpus": 2,
+          "memoryMb": 4096,
+          "ips": [
+            "10.0.0.10"
+          ]
+        }
+      ]
+    }
+  ],
   "workloads": {
     "collectedAt": "2026-09-28T10:05:00Z",
     "iisSites": [

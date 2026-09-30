@@ -3,16 +3,11 @@
 
 package inventory
 
-import (
-	"fmt"
-	"os"
-)
+import "os"
 
 // checkPrivate only checks existence on Windows; restrict the file's ACL as
 // documented in docs/AGENT.md (same ACL as agent.json).
 func checkPrivate(path string) error {
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("proxmox: tokenFile: %w", err)
-	}
-	return nil
+	_, err := os.Stat(path)
+	return err
 }
