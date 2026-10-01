@@ -15,11 +15,25 @@ import (
 // (/etc/apache2/apache2.conf on Debian, /etc/httpd/conf/httpd.conf on RHEL)
 // inside fsys (rooted at "/"), following Include / IncludeOptional. Only
 // <VirtualHost> blocks and, in them, ServerName, ServerAlias and SSLEngine
-// are read — never certificate or key paths, rewrite rules or anything else.
+// are read, plus (M25) the targets of ProxyPass / ProxyPassMatch / proxied
+// RewriteRules and BalancerMember lines — host and port only; never
+// certificate or key paths or anything else.
 func ParseApache(fsys fs.FS, mainPath string) ([]protocol.WebSite, error) {
-	p := &apacheParser{fsys: fsys, root: path.Dir(mainPath), seen: map[string]bool{}}
+	p := &apacheParser{fsys: fsys, root: path.Dir(mainPath), seen: map[string]bool{}, balancers: map[string][]protocol.Upstream{}}
 	if err := p.file(mainPath, 0); err != nil {
 		return nil, err
+	}
+	for _, s := range p.sites {
+		for _, pass := range s.passes {
+			if name, ok := strings.CutPrefix(strings.ToLower(pass), "balancer://"); ok {
+				if i := strings.Index(name, "/"); i >= 0 {
+					name = name[:i]
+				}
+				s.upstreams = addUpstreams(s.upstreams, p.balancers[name]...)
+			} else if u, ok := parseUpstream(pass); ok {
+				s.upstreams = addUpstreams(s.upstreams, u)
+			}
+		}
 	}
 	return mergeSites(p.sites), nil
 }
@@ -34,6 +48,9 @@ type apacheParser struct {
 	ports []int // ports of the current <VirtualHost>
 	ssl   bool  // SSLEngine on in the current <VirtualHost>
 	depth int   // nesting of <VirtualHost> (always 0 or 1)
+	// M25: <Proxy balancer://name> members, and the balancer being read.
+	balancers map[string][]protocol.Upstream
+	balancer  string
 }
 
 func (p *apacheParser) file(name string, depth int) error {
@@ -116,6 +133,32 @@ func (p *apacheParser) line(line string, depth int) {
 		}
 	case p.cur != nil && key == "sslengine" && len(args) > 0:
 		p.ssl = strings.EqualFold(args[0], "on")
+	case strings.HasPrefix(key, "<proxy") && len(args) > 0:
+		if name, ok := strings.CutPrefix(strings.ToLower(strings.Trim(strings.TrimSuffix(args[0], ">"), `"`)), "balancer://"); ok {
+			p.balancer = strings.TrimSuffix(name, "/")
+		}
+	case key == "</proxy>":
+		p.balancer = ""
+	case key == "balancermember" && len(args) > 0:
+		target := strings.Trim(args[0], `"`)
+		name := p.balancer
+		if after, ok := strings.CutPrefix(strings.ToLower(target), "balancer://"); ok && len(args) > 1 {
+			name = strings.SplitN(after, "/", 2)[0] // "BalancerMember balancer://x http://…" outside <Proxy>
+			target = strings.Trim(args[1], `"`)
+		}
+		if u, ok := parseUpstream(target); ok && name != "" {
+			p.balancers[name] = addUpstreams(p.balancers[name], u)
+		}
+	case p.cur != nil && (key == "proxypass" || key == "proxypassmatch") && len(args) > 1:
+		if len(p.cur.passes) < 64 && args[1] != "!" {
+			p.cur.passes = append(p.cur.passes, strings.Trim(args[1], `"`))
+		}
+	case p.cur != nil && key == "rewriterule" && len(args) > 2:
+		// Only proxied rewrites ([P] flag) forward to another server.
+		flags := strings.ToUpper(args[len(args)-1])
+		if strings.HasPrefix(flags, "[") && (strings.Contains(flags, "[P") || strings.Contains(flags, ",P")) && len(p.cur.passes) < 64 {
+			p.cur.passes = append(p.cur.passes, strings.Trim(args[1], `"`))
+		}
 	}
 }
 

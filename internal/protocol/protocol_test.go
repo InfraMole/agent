@@ -47,6 +47,16 @@ func GoldenReport() Report {
 				{ID: "qemu/9000", Type: "qemu", Node: "pve01", Name: "tpl-debian", VMID: 9000, Status: "stopped", Template: 1},
 			},
 		},
+		Kubernetes: &Kubernetes{
+			Cluster: "prod", CollectedAt: t0.Add(5 * time.Minute),
+			Nodes: []K8sNode{{Name: "k8s-node1", IPs: []string{"10.0.1.11"}, Version: "v1.31.2", OS: "Ubuntu 24.04.1 LTS"}},
+			Workloads: []K8sWorkload{{
+				Namespace: "shop", Name: "web", Kind: "Deployment", Images: []string{"ghcr.io/acme/shop:1.4.2"},
+				Replicas: intPtr(2), Ready: intPtr(2), Nodes: []string{"k8s-node1"},
+				Services: []K8sService{{Name: "web", Type: "LoadBalancer", Ports: []int{80}, ExternalIPs: []string{"203.0.113.40"}}},
+				Hosts:    []string{"shop.example.com"},
+			}},
+		},
 		Hypervisors: []Hypervisor{
 			{
 				Source: "vcenter", CollectedAt: t0.Add(5 * time.Minute),
@@ -70,11 +80,20 @@ func GoldenReport() Report {
 			},
 			SQLDatabases: &[]Database{{Instance: "MSSQLSERVER", Name: "Customers"}, {Instance: "REPORTING", Name: "Sales"}},
 			NginxSites: &[]WebSite{
-				{Name: "shop.example.com", Bindings: []WebBinding{{Protocol: "https", Port: 443, Host: "shop.example.com"}}},
+				{Name: "shop.example.com", Bindings: []WebBinding{{Protocol: "https", Port: 443, Host: "shop.example.com"}},
+					Upstreams: []Upstream{{Host: "127.0.0.1", Port: 3000}}},
 			},
-			ApacheSites:       &[]WebSite{},
+			ApacheSites: &[]WebSite{},
+			HAProxySites: &[]WebSite{{Name: "web", Bindings: []WebBinding{{Protocol: "https", Port: 443}},
+				Upstreams: []Upstream{{Host: "10.0.0.31", Port: 8080}}}},
 			PostgresDatabases: &[]Database{{Instance: "5432", Name: "orders"}},
 			MySQLDatabases:    &[]Database{{Instance: "default", Name: "wordpress"}},
+			Containers: &[]Container{
+				{Name: "shop-db-1", Image: "postgres:16-alpine", State: "running", Ports: []ContainerPort{{Port: 5432, TargetPort: 5432, Protocol: "tcp"}},
+					Project: "shop", Service: "db"},
+				{Name: "shop-web-1", Image: "ghcr.io/acme/shop:1.4.2", State: "running", Ports: []ContainerPort{},
+					Project: "shop", Service: "web", DependsOn: []string{"db"}, Hosts: []string{"shop.example.com"}},
+			},
 		},
 	}
 }
@@ -116,3 +135,5 @@ func TestClampConfig(t *testing.T) {
 		}
 	}
 }
+
+func intPtr(n int) *int { return &n }

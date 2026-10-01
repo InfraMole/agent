@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -31,8 +32,9 @@ const (
 )
 
 // Linux workloads do not exist on Windows.
-func nginxSites() ([]protocol.WebSite, bool, error)  { return nil, false, nil }
-func apacheSites() ([]protocol.WebSite, bool, error) { return nil, false, nil }
+func nginxSites() ([]protocol.WebSite, bool, error)   { return nil, false, nil }
+func apacheSites() ([]protocol.WebSite, bool, error)  { return nil, false, nil }
+func haproxySites() ([]protocol.WebSite, bool, error) { return nil, false, nil }
 func postgresDatabases(context.Context) ([]protocol.Database, bool, error) {
 	return nil, false, nil
 }
@@ -54,7 +56,42 @@ func iisSites() ([]protocol.WebSite, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("read applicationHost.config: %w", err)
 	}
+	// M25: reverse-proxy targets (ARR). Best effort: never fails the sites.
+	if _, err := f.Seek(0, io.SeekStart); err == nil {
+		if conf, err := parseIISProxies(f); err == nil {
+			for i := range sites {
+				urls := append(append([]string{}, conf.global...), conf.bySite[sites[i].Name]...)
+				if root := conf.roots[sites[i].Name]; root != "" {
+					if wc, err := os.Open(filepath.Join(os.ExpandEnv(expandWinEnv(root)), "web.config")); err == nil {
+						urls = append(urls, webConfigRewrites(io.LimitReader(wc, maxConfigBytes))...)
+						wc.Close()
+					}
+				}
+				sites[i].Upstreams = iisUpstreams(urls, conf.farms)
+			}
+		}
+	}
 	return sites, true, nil
+}
+
+// expandWinEnv turns IIS's %SystemDrive%-style variables into $VAR for os.ExpandEnv.
+func expandWinEnv(s string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, "%")
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		j := strings.Index(s[i+1:], "%")
+		if j < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i])
+		b.WriteString("${" + s[i+1:i+1+j] + "}")
+		s = s[i+2+j:]
+	}
 }
 
 // sqlDatabases lists user database names of every local SQL Server instance,

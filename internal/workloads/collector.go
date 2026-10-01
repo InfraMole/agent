@@ -18,6 +18,7 @@ type Collector struct {
 	mssql    bool
 	postgres bool
 	mysql    bool
+	docker   bool
 	interval time.Duration
 	last     time.Time
 	log      *slog.Logger
@@ -34,10 +35,11 @@ func New(c *config.Collectors, log *slog.Logger) *Collector {
 		mssql:    c.SQLServerEnabled() && onWindows,
 		postgres: c.PostgreSQLEnabled() && onLinux,
 		mysql:    c.MySQLEnabled() && onLinux,
+		docker:   c.DockerEnabled() && onLinux,
 		interval: c.WorkloadsInterval(),
 		log:      log,
 	}
-	if !col.web && !col.mssql && !col.postgres && !col.mysql {
+	if !col.web && !col.mssql && !col.postgres && !col.mysql && !col.docker {
 		return nil
 	}
 	return col
@@ -57,6 +59,7 @@ func (c *Collector) Due(ctx context.Context, now time.Time) *protocol.Workloads 
 		out.IISSites = c.sites("IIS sites", iisSites)
 		out.NginxSites = c.sites("nginx sites", nginxSites)
 		out.ApacheSites = c.sites("Apache sites", apacheSites)
+		out.HAProxySites = c.sites("HAProxy frontends", haproxySites)
 	}
 	if c.mssql {
 		out.SQLDatabases = c.databases(ctx, "SQL Server databases", func(ctx context.Context) ([]protocol.Database, bool, error) {
@@ -70,7 +73,10 @@ func (c *Collector) Due(ctx context.Context, now time.Time) *protocol.Workloads 
 	if c.mysql {
 		out.MySQLDatabases = c.databases(ctx, "MySQL databases", mysqlDatabases)
 	}
-	if out.IISSites == nil && out.SQLDatabases == nil && !out.HasLinux() {
+	if c.docker {
+		out.Containers = c.containers(ctx)
+	}
+	if out.IISSites == nil && out.SQLDatabases == nil && !out.HasLinux() && out.Containers == nil {
 		return nil
 	}
 	return out
@@ -120,6 +126,18 @@ func (c *Collector) databases(
 		dbs = []protocol.Database{} // "collected, none" must encode as [], not null
 	}
 	return &dbs
+}
+
+func (c *Collector) containers(ctx context.Context) *[]protocol.Container {
+	list, found, err := dockerContainers(ctx)
+	switch {
+	case err != nil:
+		c.log.Warn("Docker containers not collected", "err", err)
+		return nil
+	case !found:
+		return nil
+	}
+	return &list // never nil: toContainers returns []
 }
 
 // Retry makes the next report collect again (the last result was lost).

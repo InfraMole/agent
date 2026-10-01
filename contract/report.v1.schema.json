@@ -480,6 +480,197 @@
         "additionalProperties": false
       }
     },
+    "kubernetes": {
+      "type": "object",
+      "properties": {
+        "cluster": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "collectedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "nodes": {
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253
+              },
+              "ips": {
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "ipv4",
+                      "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+                    },
+                    {
+                      "type": "string",
+                      "format": "ipv6",
+                      "pattern": "^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$"
+                    }
+                  ]
+                }
+              },
+              "version": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "os": {
+                "type": "string",
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "name",
+              "ips"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "workloads": {
+          "maxItems": 2000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "namespace": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "Deployment",
+                  "StatefulSet",
+                  "DaemonSet"
+                ]
+              },
+              "images": {
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "replicas": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "ready": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "nodes": {
+                "maxItems": 500,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 253
+                }
+              },
+              "services": {
+                "maxItems": 16,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    },
+                    "type": {
+                      "type": "string",
+                      "maxLength": 32
+                    },
+                    "ports": {
+                      "maxItems": 32,
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      }
+                    },
+                    "externalIps": {
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "ipv4",
+                            "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+                          },
+                          {
+                            "type": "string",
+                            "format": "ipv6",
+                            "pattern": "^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "type",
+                    "ports"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "hosts": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 253
+                }
+              }
+            },
+            "required": [
+              "namespace",
+              "name",
+              "kind",
+              "images",
+              "nodes",
+              "services"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "cluster",
+        "collectedAt",
+        "nodes",
+        "workloads"
+      ],
+      "additionalProperties": false
+    },
     "workloads": {
       "type": "object",
       "properties": {
@@ -524,6 +715,30 @@
                   },
                   "required": [
                     "protocol",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "upstreams": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "host",
                     "port"
                   ],
                   "additionalProperties": false
@@ -601,6 +816,30 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "upstreams": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "host",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -646,6 +885,30 @@
                   },
                   "required": [
                     "protocol",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "upstreams": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "host",
                     "port"
                   ],
                   "additionalProperties": false
@@ -703,6 +966,167 @@
             "required": [
               "instance",
               "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "haproxySites": {
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "bindings": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "http",
+                        "https"
+                      ]
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "host": {
+                      "type": "string",
+                      "maxLength": 253
+                    }
+                  },
+                  "required": [
+                    "protocol",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "upstreams": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    },
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "host",
+                    "port"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "name",
+              "bindings"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "containers": {
+          "maxItems": 500,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "image": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "state": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "ports": {
+                "maxItems": 64,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "port": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "targetPort": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "tcp",
+                        "udp",
+                        "sctp"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "port",
+                    "targetPort",
+                    "protocol"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "project": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "service": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "dependsOn": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "hosts": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 253
+                }
+              }
+            },
+            "required": [
+              "name",
+              "image",
+              "ports"
             ],
             "additionalProperties": false
           }

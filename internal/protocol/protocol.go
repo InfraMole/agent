@@ -67,6 +67,19 @@ const FeatureWorkloads = "workloads"
 // (nginx, Apache, PostgreSQL, MySQL — M20).
 const FeatureWorkloadsLinux = "workloads-linux"
 
+// FeatureContainers: the server accepts Workloads.Containers (M25).
+const FeatureContainers = "containers"
+
+// FeatureProxies: the server accepts WebSite.Upstreams and
+// Workloads.HAProxySites (M25).
+const FeatureProxies = "proxies"
+
+// FeatureKubernetes: the server accepts Report.Kubernetes (M25).
+const FeatureKubernetes = "kubernetes"
+
+// MaxUpstreams per site.
+const MaxUpstreams = 32
+
 // FeatureHypervisors: the server accepts Report.Hypervisors (M24).
 const FeatureHypervisors = "hypervisors"
 
@@ -89,7 +102,43 @@ type Report struct {
 	Truncated     bool         `json:"truncated,omitempty"`
 	Inventory     *Inventory   `json:"inventory,omitempty"`
 	Hypervisors   []Hypervisor `json:"hypervisors,omitempty"`
+	Kubernetes    *Kubernetes  `json:"kubernetes,omitempty"`
 	Workloads     *Workloads   `json:"workloads,omitempty"`
+}
+
+// Kubernetes (M25): nodes and workloads of one cluster. Labels, env,
+// secrets and config maps never leave the agent.
+type Kubernetes struct {
+	Cluster     string        `json:"cluster"`
+	CollectedAt time.Time     `json:"collectedAt"`
+	Nodes       []K8sNode     `json:"nodes"`
+	Workloads   []K8sWorkload `json:"workloads"`
+}
+
+type K8sNode struct {
+	Name    string   `json:"name"`
+	IPs     []string `json:"ips"`
+	Version string   `json:"version,omitempty"`
+	OS      string   `json:"os,omitempty"`
+}
+
+type K8sWorkload struct {
+	Namespace string       `json:"namespace"`
+	Name      string       `json:"name"`
+	Kind      string       `json:"kind"` // Deployment | StatefulSet | DaemonSet
+	Images    []string     `json:"images"`
+	Replicas  *int         `json:"replicas,omitempty"`
+	Ready     *int         `json:"ready,omitempty"`
+	Nodes     []string     `json:"nodes"`
+	Services  []K8sService `json:"services"`
+	Hosts     []string     `json:"hosts,omitempty"`
+}
+
+type K8sService struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Ports       []int    `json:"ports"`
+	ExternalIPs []string `json:"externalIps,omitempty"`
 }
 
 // Hypervisor is one agent-side hypervisor collection (M24): hosts and VMs of
@@ -135,11 +184,35 @@ type Workloads struct {
 	ApacheSites       *[]WebSite  `json:"apacheSites,omitempty"`
 	PostgresDatabases *[]Database `json:"postgresDatabases,omitempty"`
 	MySQLDatabases    *[]Database `json:"mysqlDatabases,omitempty"`
+	// HAProxySites (M25, FeatureProxies): frontend / listen sections.
+	HAProxySites *[]WebSite `json:"haproxySites,omitempty"`
+	// Containers (M25, FeatureContainers): Docker containers on this host.
+	Containers *[]Container `json:"containers,omitempty"`
+}
+
+// Container: what the Engine's container list says, minus everything but
+// the Compose project / service / depends_on and reverse-proxy host names.
+type Container struct {
+	Name      string          `json:"name"`
+	Image     string          `json:"image"`
+	State     string          `json:"state,omitempty"`
+	Ports     []ContainerPort `json:"ports"`
+	Project   string          `json:"project,omitempty"`
+	Service   string          `json:"service,omitempty"`
+	DependsOn []string        `json:"dependsOn,omitempty"`
+	Hosts     []string        `json:"hosts,omitempty"`
+}
+
+// ContainerPort: a port published on the host.
+type ContainerPort struct {
+	Port       int    `json:"port"`
+	TargetPort int    `json:"targetPort"`
+	Protocol   string `json:"protocol"` // "tcp" | "udp" | "sctp"
 }
 
 // HasLinux: any Linux-only field is set (needs FeatureWorkloadsLinux).
 func (w *Workloads) HasLinux() bool {
-	return w != nil && (w.NginxSites != nil || w.ApacheSites != nil || w.PostgresDatabases != nil || w.MySQLDatabases != nil)
+	return w != nil && (w.NginxSites != nil || w.ApacheSites != nil || w.PostgresDatabases != nil || w.MySQLDatabases != nil || w.HAProxySites != nil)
 }
 
 // WebSite: an IIS site, nginx server block or Apache virtual host — name and
@@ -147,6 +220,15 @@ func (w *Workloads) HasLinux() bool {
 type WebSite struct {
 	Name     string       `json:"name"`
 	Bindings []WebBinding `json:"bindings"`
+	// Upstreams (M25, FeatureProxies): where the site forwards requests
+	// (proxy_pass, ProxyPass, HAProxy servers, IIS ARR rewrites).
+	Upstreams []Upstream `json:"upstreams,omitempty"`
+}
+
+// Upstream: a reverse-proxy target, host and port only.
+type Upstream struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
 type WebBinding struct {

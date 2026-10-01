@@ -155,6 +155,50 @@
       ]
     }
   ],
+  "kubernetes": {
+    "cluster": "prod",
+    "collectedAt": "2026-09-28T10:05:00Z",
+    "nodes": [
+      {
+        "name": "k8s-node1",
+        "ips": [
+          "10.0.1.11"
+        ],
+        "version": "v1.31.2",
+        "os": "Ubuntu 24.04.1 LTS"
+      }
+    ],
+    "workloads": [
+      {
+        "namespace": "shop",
+        "name": "web",
+        "kind": "Deployment",
+        "images": [
+          "ghcr.io/acme/shop:1.4.2"
+        ],
+        "replicas": 2,
+        "ready": 2,
+        "nodes": [
+          "k8s-node1"
+        ],
+        "services": [
+          {
+            "name": "web",
+            "type": "LoadBalancer",
+            "ports": [
+              80
+            ],
+            "externalIps": [
+              "203.0.113.40"
+            ]
+          }
+        ],
+        "hosts": [
+          "shop.example.com"
+        ]
+      }
+    ]
+  },
   "workloads": {
     "collectedAt": "2026-09-28T10:05:00Z",
     "iisSites": [
@@ -196,6 +240,12 @@
             "port": 443,
             "host": "shop.example.com"
           }
+        ],
+        "upstreams": [
+          {
+            "host": "127.0.0.1",
+            "port": 3000
+          }
         ]
       }
     ],
@@ -210,6 +260,53 @@
       {
         "instance": "default",
         "name": "wordpress"
+      }
+    ],
+    "haproxySites": [
+      {
+        "name": "web",
+        "bindings": [
+          {
+            "protocol": "https",
+            "port": 443
+          }
+        ],
+        "upstreams": [
+          {
+            "host": "10.0.0.31",
+            "port": 8080
+          }
+        ]
+      }
+    ],
+    "containers": [
+      {
+        "name": "shop-db-1",
+        "image": "postgres:16-alpine",
+        "state": "running",
+        "ports": [
+          {
+            "port": 5432,
+            "targetPort": 5432,
+            "protocol": "tcp"
+          }
+        ],
+        "project": "shop",
+        "service": "db"
+      },
+      {
+        "name": "shop-web-1",
+        "image": "ghcr.io/acme/shop:1.4.2",
+        "state": "running",
+        "ports": [],
+        "project": "shop",
+        "service": "web",
+        "dependsOn": [
+          "db"
+        ],
+        "hosts": [
+          "shop.example.com"
+        ]
       }
     ]
   }

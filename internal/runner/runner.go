@@ -156,11 +156,20 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	report := col.Build(ctx)
 	report.Inventory = inv.Due(ctx, time.Now())
 	report.Hypervisors = inv.DueHypervisors(ctx, time.Now(), false)
+	report.Kubernetes = inv.DueKubernetes(ctx, time.Now(), false)
 	report.Workloads = wl.due(ctx, time.Now())
 	res, err := c.Report(ctx, cfg.AgentSecret, report)
 	if err != nil {
 		if report.Inventory != nil {
 			inv.Retry() // the inventory was lost with the report
+		}
+		if report.Kubernetes != nil && inv != nil {
+			if errors.Is(err, client.ErrRejected) {
+				inv.k8sDisabled = true
+				log.Warn("server rejected the kubernetes section; not sending it again until restart", "err", err)
+			} else if inv.k8s != nil {
+				inv.k8s.last = time.Time{}
+			}
 		}
 		if len(report.Hypervisors) > 0 {
 			if errors.Is(err, client.ErrRejected) {
@@ -184,6 +193,8 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	}
 	wl.accepted = !wl.disabled && hasFeature(res.Features, protocol.FeatureWorkloads)
 	wl.linux = hasFeature(res.Features, protocol.FeatureWorkloadsLinux)
+	wl.docker = hasFeature(res.Features, protocol.FeatureContainers)
+	wl.proxies = hasFeature(res.Features, protocol.FeatureProxies)
 	inv.negotiated(res.Features)
 	log.Info("report sent", "connections", len(report.Connections), "listeners", len(report.Listeners),
 		"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil, "hypervisors", len(report.Hypervisors),
@@ -198,6 +209,8 @@ type serverWorkloads struct {
 	col      *workloads.Collector
 	accepted bool
 	linux    bool // the server also accepts the Linux fields (M20)
+	docker   bool // the server also accepts containers (M25)
+	proxies  bool // the server also accepts site upstreams and HAProxy (M25)
 	disabled bool // the server rejected them once in this run
 }
 
@@ -206,9 +219,27 @@ func (w *serverWorkloads) due(ctx context.Context, now time.Time) *protocol.Work
 		return nil
 	}
 	out := w.col.Due(ctx, now)
+	if out != nil && !w.proxies {
+		// A server before M25 rejects the new fields.
+		out.HAProxySites = nil
+		for _, list := range []*[]protocol.WebSite{out.IISSites, out.NginxSites, out.ApacheSites} {
+			if list != nil {
+				for i := range *list {
+					(*list)[i].Upstreams = nil
+				}
+			}
+		}
+	}
+	if out != nil && !w.docker {
+		out.Containers = nil // a server before M25
+		if out.IISSites == nil && out.SQLDatabases == nil && !out.HasLinux() {
+			return nil
+		}
+	}
 	if out != nil && !w.linux {
 		// A 0.5–0.7 server knows only the Windows fields.
 		out.NginxSites, out.ApacheSites, out.PostgresDatabases, out.MySQLDatabases = nil, nil, nil, nil
+		out.Containers = nil
 		if out.IISSites == nil && out.SQLDatabases == nil {
 			return nil
 		}
@@ -233,17 +264,36 @@ type Inventory struct {
 	last     time.Time
 	// M24: hypervisor collectors, sent only once the server lists
 	// "hypervisors" in its features (an older server rejects the field).
-	hypervisors []*hypervisorCollector
+	hypervisors []*hypervisorCollector[protocol.Hypervisor]
 	hvAccepted  bool
 	hvDisabled  bool // the server rejected the section once in this run
+	// M25: Kubernetes, same negotiation ("kubernetes" feature).
+	k8s         *hypervisorCollector[protocol.Kubernetes]
+	k8sAccepted bool
+	k8sDisabled bool
 	log         *slog.Logger
 }
 
-type hypervisorCollector struct {
+// hypervisorCollector: one slow collector with its own cadence.
+type hypervisorCollector[T any] struct {
 	source   string
-	collect  func(context.Context) (*protocol.Hypervisor, error)
+	collect  func(context.Context) (*T, error)
 	interval time.Duration
 	last     time.Time
+}
+
+// due runs the collector when its interval has elapsed (nil otherwise or on error).
+func (h *hypervisorCollector[T]) due(ctx context.Context, now time.Time, log *slog.Logger) *T {
+	if h == nil || (!h.last.IsZero() && now.Sub(h.last) < h.interval) {
+		return nil
+	}
+	h.last = now
+	out, err := h.collect(ctx)
+	if err != nil {
+		log.Warn(h.source+" inventory failed", "err", err)
+		return nil
+	}
+	return out
 }
 
 func NewInventory(cfg *config.File, log *slog.Logger) *Inventory {
@@ -267,7 +317,7 @@ func NewInventory(cfg *config.File, log *slog.Logger) *Inventory {
 		}
 		interval := config.ClampInterval(every)
 		log.Info(source+" collector enabled", "every", interval)
-		inv.hypervisors = append(inv.hypervisors, &hypervisorCollector{source: source, collect: collect, interval: interval})
+		inv.hypervisors = append(inv.hypervisors, &hypervisorCollector[protocol.Hypervisor]{source: source, collect: collect, interval: interval})
 	}
 	if c.VCenter != nil {
 		v, err := inventory.NewVCenter(*c.VCenter)
@@ -281,7 +331,16 @@ func NewInventory(cfg *config.File, log *slog.Logger) *Inventory {
 		h, err := inventory.NewHyperV()
 		add("hyperv", c.HyperV.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return h.Collect(ctx) }, err)
 	}
-	if inv.proxmox == nil && len(inv.hypervisors) == 0 {
+	if c.Kubernetes != nil {
+		if k, err := inventory.NewKubernetes(*c.Kubernetes); err != nil {
+			log.Warn("kubernetes collector disabled", "err", err)
+		} else {
+			interval := config.ClampInterval(c.Kubernetes.IntervalSec)
+			log.Info("kubernetes collector enabled", "cluster", c.Kubernetes.Cluster, "every", interval)
+			inv.k8s = &hypervisorCollector[protocol.Kubernetes]{source: "kubernetes", collect: k.Collect, interval: interval}
+		}
+	}
+	if inv.proxmox == nil && len(inv.hypervisors) == 0 && inv.k8s == nil {
 		return nil
 	}
 	return inv
@@ -316,18 +375,19 @@ func (i *Inventory) DueHypervisors(ctx context.Context, now time.Time, force boo
 	}
 	var out []protocol.Hypervisor
 	for _, h := range i.hypervisors {
-		if !h.last.IsZero() && now.Sub(h.last) < h.interval {
-			continue
+		if inv := h.due(ctx, now, i.log); inv != nil {
+			out = append(out, *inv)
 		}
-		h.last = now
-		inv, err := h.collect(ctx)
-		if err != nil {
-			i.log.Warn(h.source+" inventory failed", "err", err)
-			continue
-		}
-		out = append(out, *inv)
 	}
 	return out
+}
+
+// DueKubernetes: the cluster inventory when due (force: dry-run).
+func (i *Inventory) DueKubernetes(ctx context.Context, now time.Time, force bool) *protocol.Kubernetes {
+	if i == nil || (!force && (!i.k8sAccepted || i.k8sDisabled)) {
+		return nil
+	}
+	return i.k8s.due(ctx, now, i.log)
 }
 
 // RetryHypervisors: the collections were lost with a failed report.
@@ -348,6 +408,7 @@ func (i *Inventory) RetryHypervisors(sent []protocol.Hypervisor) {
 func (i *Inventory) negotiated(features []string) {
 	if i != nil {
 		i.hvAccepted = hasFeature(features, protocol.FeatureHypervisors)
+		i.k8sAccepted = hasFeature(features, protocol.FeatureKubernetes)
 	}
 }
 

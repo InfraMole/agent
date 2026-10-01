@@ -15,7 +15,7 @@ func TestHypervisorsNegotiatedAndPaced(t *testing.T) {
 	calls := 0
 	inv := &Inventory{
 		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		hypervisors: []*hypervisorCollector{{
+		hypervisors: []*hypervisorCollector[protocol.Hypervisor]{{
 			source: "vcenter", interval: time.Hour,
 			collect: func(context.Context) (*protocol.Hypervisor, error) {
 				calls++

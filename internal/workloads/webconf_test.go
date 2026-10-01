@@ -69,7 +69,8 @@ server { server_name ~^(www\.)?(?<d>.+)$; }`)},
 		`{"name":"default (port 80)","bindings":[{"protocol":"http","port":80}]},` +
 		`{"name":"shop.example.com","bindings":[` +
 		`{"protocol":"http","port":80,"host":"shop.example.com"},` +
-		`{"protocol":"https","port":443,"host":"shop.example.com"}]}]`
+		`{"protocol":"https","port":443,"host":"shop.example.com"}],` +
+		`"upstreams":[{"host":"127.0.0.1","port":3000}]}]`
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}

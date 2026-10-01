@@ -35,6 +35,7 @@ type Collectors struct {
 	VCenter      *VCenterCollector      `json:"vcenter,omitempty"`
 	XenOrchestra *XenOrchestraCollector `json:"xenOrchestra,omitempty"`
 	HyperV       *HyperVCollector       `json:"hyperv,omitempty"`
+	Kubernetes   *KubernetesCollector   `json:"kubernetes,omitempty"`
 	Workloads    *WorkloadsCollector    `json:"workloads,omitempty"`
 }
 
@@ -65,6 +66,22 @@ type HyperVCollector struct {
 	IntervalSec int `json:"intervalSec,omitempty"` // default 3600, min 300
 }
 
+// KubernetesCollector (M25) reads nodes and workloads of one cluster with a
+// get/list-only service account token, from outside (url + tokenFile) or
+// from a pod in the cluster (inCluster: the mounted service account).
+type KubernetesCollector struct {
+	Cluster            string `json:"cluster"`             // name shown in InfraMole
+	URL                string `json:"url,omitempty"`       // https://k8s-api.corp.local:6443
+	TokenFile          string `json:"tokenFile,omitempty"` // the service account token
+	CAFile             string `json:"caFile,omitempty"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
+	InCluster          bool   `json:"inCluster,omitempty"`
+	// System namespaces (kube-system, kube-public, kube-node-lease) are
+	// skipped unless this is set.
+	IncludeSystemNamespaces bool `json:"includeSystemNamespaces,omitempty"`
+	IntervalSec             int  `json:"intervalSec,omitempty"` // default 3600, min 300
+}
+
 // ClampInterval clamps a collector cadence to [5 min, 1 day], default 1 h.
 func ClampInterval(sec int) time.Duration {
 	return ProxmoxCollector{IntervalSec: sec}.Interval()
@@ -81,6 +98,7 @@ type WorkloadsCollector struct {
 	SQLServer   bool  `json:"sqlServer,omitempty"`   // default false (Windows)
 	PostgreSQL  bool  `json:"postgresql,omitempty"`  // default false (Linux)
 	MySQL       bool  `json:"mysql,omitempty"`       // default false (Linux: MySQL and MariaDB)
+	Docker      *bool `json:"docker,omitempty"`      // default true (Linux: container list from the local socket)
 	IntervalSec int   `json:"intervalSec,omitempty"` // default 3600, min 300
 }
 
@@ -104,6 +122,11 @@ func (c *Collectors) PostgreSQLEnabled() bool {
 
 func (c *Collectors) MySQLEnabled() bool {
 	return c != nil && c.Workloads != nil && c.Workloads.MySQL
+}
+
+// DockerEnabled: on unless explicitly turned off (M25).
+func (c *Collectors) DockerEnabled() bool {
+	return c == nil || c.Workloads == nil || c.Workloads.Docker == nil || *c.Workloads.Docker
 }
 
 // SQLServerEnabled: off unless explicitly turned on.

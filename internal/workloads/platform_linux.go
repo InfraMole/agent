@@ -39,6 +39,11 @@ func apacheSites() ([]protocol.WebSite, bool, error) {
 	return webConfig(ParseApache, "/etc/apache2/apache2.conf", "/etc/httpd/conf/httpd.conf")
 }
 
+// haproxySites reads the HAProxy configuration (M25).
+func haproxySites() ([]protocol.WebSite, bool, error) {
+	return webConfig(ParseHAProxy, "/etc/haproxy/haproxy.cfg")
+}
+
 func webConfig(parse func(fs.FS, string) ([]protocol.WebSite, error), candidates ...string) ([]protocol.WebSite, bool, error) {
 	for _, main := range candidates {
 		if _, err := os.Stat(main); err != nil {

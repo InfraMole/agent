@@ -203,6 +203,56 @@ guest.net`. govmomi is a **test-only** dependency (its simulator); linking
   DETECTED), templates skipped. The planner matches a VM to an agent's
   SERVER host by VM name **or guest host name (short form)**.
 
+### 6e. Containers, reverse proxies and Kubernetes ✅ M25 (ADR-036)
+
+Three features, each negotiated (`features`): `containers`, `proxies`,
+`kubernetes`. An agent never sends a field the server did not list; a 422
+stops that section for the run.
+
+- **Docker** (`internal/workloads/docker.go`, Linux, default on;
+  `collectors.workloads.docker: false` disables): `GET /containers/json?all=1`
+  and `GET /images/json` (to name `sha256:` images) on
+  `/var/run/docker.sock`. **Never** `/containers/{id}/json` (it carries the
+  environment). Kept: name, image, state, published ports, Compose project /
+  service / `depends_on`, and host names of Traefik router rules
+  (`Host(…)`) / caddy-docker-proxy labels; every other label is dropped
+  (they can hold credentials — a test checks Traefik basic-auth hashes do
+  not leak). Field `workloads.containers` (snapshot; reconciled as
+  `collector:<agentId>:docker`, imported before the proxy kinds so local
+  upstreams can resolve to containers).
+- **Reverse-proxy targets** (`internal/workloads/proxies.go`): `upstreams`
+  (host:port, max 32) on nginx sites (`*_pass` + `upstream` blocks), Apache
+  sites (`ProxyPass[Match]`, `<Proxy balancer://>` members, `RewriteRule …
+[P]`), IIS sites (ARR: Rewrite actions in applicationHost.config global /
+  `<location>` rules, web farms, and the site's own `web.config` — only
+  rewrite actions are decoded) and the new `haproxySites` (frontend /
+  listen sections with their backends' servers). URLs keep host and port
+  only (no path, query or userinfo).
+- **Kubernetes** (`internal/inventory/kubernetes.go`,
+  `collectors.kubernetes`: `cluster`, `url` + `tokenFile` + `caFile` or
+  `inCluster`): GET list (limit 500 + continue) of nodes, pods, replica
+  sets, deployments, stateful sets, daemon sets, services, ingresses
+  (optional). Typed structs decode only the fields used (env, args,
+  volumes, annotations are never decoded). Joins on the agent: pod → RS →
+  Deployment placement, Service selector ⊆ pod-template labels, Ingress
+  host → service → workload. System namespaces skipped unless
+  `includeSystemNamespaces`. LB IPs equal to a node IP are dropped (k3s
+  servicelb). Report field `kubernetes`.
+- Server: importer formats `workloads` (containers, haproxy, upstreams)
+  and `kubernetes` (`parse-platforms.ts`; `classifyImage` maps images to
+  DATABASE / CONTAINER and a technology tag; an untagged `sha256:` image is
+  classified by its Compose service name). Upstreams become `DEPENDS_ON`
+  **suggestions** via `endpoint:<hostId>|<host>|<port>` references,
+  resolved by the planner (loopback → the agent's host, IP → its single
+  non-DOMAIN owner, name → single resource by name / host name / FQDN; then
+  the single workload RUNS_ON it that publishes the port). Unresolved →
+  warning.
+- Verified with release-style binaries: Docker on the dev machine (22 real
+  containers, no env / label secrets in the output), nginx + HAProxy
+  configs, and a real **k3s** cluster with the documented ClusterRole; then
+  an end-to-end `run` against the dev server (first report without the new
+  sections, second with them, everything imported).
+
 ### 6c. Windows workloads ✅ M16 (ADR-028)
 
 `internal/workloads`, collected hourly (`collectors.workloads.intervalSec`,

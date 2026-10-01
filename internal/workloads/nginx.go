@@ -21,34 +21,52 @@ const (
 // ParseNginx reads nginx's configuration starting at mainPath (e.g.
 // /etc/nginx/nginx.conf) inside fsys (rooted at "/"), following include
 // directives. Only `server` blocks of the http context are read, and in them
-// only `listen` and `server_name`: certificates, keys, locations, upstreams
-// and everything else are skipped.
+// only `listen`, `server_name` and the targets of `*_pass` directives (M25;
+// host and port only), plus the `server` lines of `upstream` blocks they
+// name: certificates, keys, headers and everything else are skipped.
 func ParseNginx(fsys fs.FS, mainPath string) ([]protocol.WebSite, error) {
-	p := &nginxParser{fsys: fsys, prefix: path.Dir(mainPath), seen: map[string]bool{}}
+	p := &nginxParser{fsys: fsys, prefix: path.Dir(mainPath), seen: map[string]bool{}, upstreams: map[string][]protocol.Upstream{}}
 	if err := p.file(mainPath, nil, 0); err != nil {
 		return nil, err
+	}
+	for _, s := range p.sites {
+		for _, pass := range s.passes {
+			name := strings.TrimPrefix(strings.TrimPrefix(pass, "http://"), "https://")
+			if i := strings.IndexAny(name, "/:"); i >= 0 {
+				name = name[:i]
+			}
+			if servers, ok := p.upstreams[name]; ok {
+				s.upstreams = addUpstreams(s.upstreams, servers...)
+			} else if u, ok := parseUpstream(pass); ok {
+				s.upstreams = addUpstreams(s.upstreams, u)
+			}
+		}
 	}
 	return mergeSites(p.sites), nil
 }
 
 type nginxParser struct {
-	fsys   fs.FS
-	prefix string
-	seen   map[string]bool
-	files  int
-	sites  []*rawSite
+	fsys      fs.FS
+	prefix    string
+	seen      map[string]bool
+	files     int
+	sites     []*rawSite
+	upstreams map[string][]protocol.Upstream // upstream blocks by name
 }
 
 // rawSite is one server block / virtual host before merging by name.
 type rawSite struct {
-	names    []string
-	bindings []protocol.WebBinding
-	listened bool // a listen directive was seen (even one we skip, like unix:)
+	names     []string
+	bindings  []protocol.WebBinding
+	listened  bool     // a listen directive was seen (even one we skip, like unix:)
+	passes    []string // raw *_pass targets (resolved against upstream blocks at the end)
+	upstreams []protocol.Upstream
 }
 
 type nginxFrame struct {
-	name   string
-	server *rawSite
+	name     string
+	server   *rawSite
+	upstream string // name of an `upstream` block
 }
 
 func (p *nginxParser) file(name string, stack []nginxFrame, depth int) error {
@@ -92,6 +110,9 @@ func (p *nginxParser) block(toks []string, i int, stack []nginxFrame, depth int)
 				frame.server = &rawSite{}
 				p.sites = append(p.sites, frame.server)
 			}
+			if frame.name == "upstream" && len(words) > 1 {
+				frame.upstream = words[1]
+			}
 			next, err := p.block(toks, j+1, append(stack, frame), depth)
 			if err != nil {
 				return 0, err
@@ -133,7 +154,28 @@ func (p *nginxParser) directive(words []string, stack []nginxFrame, depth int) {
 	if n := len(stack); n > 0 {
 		server = stack[n-1].server
 	}
+	// *_pass directives live in location blocks: the nearest server counts.
+	var enclosing *rawSite
+	for i := len(stack) - 1; i >= 0 && enclosing == nil; i-- {
+		enclosing = stack[i].server
+	}
 	switch words[0] {
+	case "proxy_pass", "grpc_pass", "fastcgi_pass", "uwsgi_pass", "scgi_pass":
+		if enclosing != nil && len(words) > 1 && len(enclosing.passes) < 64 {
+			enclosing.passes = append(enclosing.passes, words[1])
+		}
+	case "server":
+		if n := len(stack); n > 0 && stack[n-1].upstream != "" && len(words) > 1 {
+			if u, ok := parseUpstream(words[1]); ok {
+				name := stack[n-1].upstream
+				p.upstreams[name] = addUpstreams(p.upstreams[name], u)
+			} else if !strings.Contains(words[1], ":") && !strings.HasPrefix(words[1], "unix:") {
+				if u, ok := parseUpstream(words[1] + ":80"); ok { // "server app.lan;" = port 80
+					name := stack[n-1].upstream
+					p.upstreams[name] = addUpstreams(p.upstreams[name], u)
+				}
+			}
+		}
 	case "include":
 		if len(words) < 2 {
 			return
@@ -274,6 +316,7 @@ func mergeSites(raw []*rawSite) []protocol.WebSite {
 			byName[name] = a
 			order = append(order, name)
 		}
+		a.site.Upstreams = addUpstreams(a.site.Upstreams, r.upstreams...)
 		for _, b := range r.bindings {
 			b.Host = host
 			key := b.Protocol + "|" + strconv.Itoa(b.Port) + "|" + b.Host
