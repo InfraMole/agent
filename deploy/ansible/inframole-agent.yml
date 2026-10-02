@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Installs and enrols the InfraMole agent on Linux hosts. Idempotent: a host
+# that is already enrolled is never enrolled again; a new binary version
+# (inframole_agent_version) replaces the old one and restarts the service.
+#
+#   ansible-playbook -i inventory.ini inframole-agent.yml \
+#     -e inframole_server=https://inframole.example.com \
+#     -e @vault.yml            # inframole_enrollment_token: dmp_enr_...
+#
+# Guide: https://inframole.com/docs/agent/mass-deployment
+- name: InfraMole agent
+  hosts: "{{ inframole_hosts | default('all') }}"
+  become: true
+  vars:
+    # Required.
+    inframole_server: ""
+    inframole_enrollment_token: ""
+    # "latest" or a release tag such as "v0.6.0".
+    inframole_agent_version: latest
+    # Override to serve the binaries and SHA256SUMS from an internal mirror.
+    inframole_download_base_url: >-
+      {{ 'https://github.com/InfraMole/agent/releases/latest/download'
+         if inframole_agent_version == 'latest'
+         else 'https://github.com/InfraMole/agent/releases/download/' ~ inframole_agent_version }}
+    # http:// servers (local tests only).
+    inframole_insecure_dev: false
+    inframole_arch_map: { x86_64: amd64, amd64: amd64, aarch64: arm64, arm64: arm64 }
+
+  tasks:
+    - name: Check the required variables
+      ansible.builtin.assert:
+        that:
+          - inframole_server | length > 0
+          - inframole_insecure_dev | bool or inframole_server is match('https://')
+        fail_msg: Set inframole_server (https://…).
+        quiet: true
+
+    - name: Read the enrolment
+      ansible.builtin.stat:
+        path: /etc/inframole/agent.json
+      register: inframole_config
+
+    - name: Check the enrollment token (only needed for hosts not enrolled yet)
+      ansible.builtin.assert:
+        that: inframole_enrollment_token | length > 0
+        fail_msg: Set inframole_enrollment_token (keep it in a vault).
+        quiet: true
+      when: not inframole_config.stat.exists
+
+    - name: Download the agent, verified against SHA256SUMS
+      vars:
+        inframole_file: "inframole-agent_linux_{{ inframole_arch_map[ansible_facts.architecture] }}"
+      ansible.builtin.get_url:
+        url: "{{ inframole_download_base_url }}/{{ inframole_file }}"
+        checksum: "sha256:{{ inframole_download_base_url }}/SHA256SUMS"
+        dest: /usr/local/bin/inframole-agent
+        mode: "0755"
+        owner: root
+        group: root
+      register: inframole_binary
+      notify: Restart the agent
+
+    - name: Enrol and install the service (first time only)
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/local/bin/inframole-agent', 'install', '--server', inframole_server]
+             + (['--insecure-dev'] if inframole_insecure_dev | bool else []) }}
+        creates: /etc/inframole/agent.json
+      environment:
+        INFRAMOLE_ENROLLMENT_TOKEN: "{{ inframole_enrollment_token }}"
+      no_log: true # the environment holds the token
+
+    - name: Read the services
+      ansible.builtin.service_facts:
+      when: inframole_config.stat.exists
+
+    - name: Reinstall the service with the existing enrolment if it was removed
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/local/bin/inframole-agent', 'install', '--server', inframole_server]
+             + (['--insecure-dev'] if inframole_insecure_dev | bool else []) }}
+      when:
+        - inframole_config.stat.exists
+        - "'inframole-agent.service' not in ansible_facts.services"
+      changed_when: true
+
+    - name: Keep the service enabled and running
+      ansible.builtin.service:
+        name: inframole-agent
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart the agent
+      ansible.builtin.service:
+        name: inframole-agent
+        state: restarted
+      # A first install is started by `install` itself.
+      when: inframole_config.stat.exists

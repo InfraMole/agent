@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://inframole.com/docs
+    about: Installation, the agent, integrations and how the map works.
+  - name: Report a security vulnerability
+    url: https://github.com/InfraMole/agent/security/policy
+    about: Privately to security@inframole.com — never in a public issue.

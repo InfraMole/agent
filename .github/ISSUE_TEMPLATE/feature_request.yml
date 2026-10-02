@@ -1,0 +1,27 @@
+name: Feature request
+description: An idea for InfraMole.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        InfraMole maps what you have and what depends on what. It is not a
+        monitoring, alerting or remote-management tool, and never runs
+        commands on your machines — ideas in those directions are usually
+        out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Tell us about your infrastructure and what you are trying to understand.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: Your idea, if you have one. Screenshots or sketches are welcome.
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you work around it today?

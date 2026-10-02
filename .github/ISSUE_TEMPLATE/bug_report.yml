@@ -1,0 +1,47 @@
+name: Bug report
+description: The agent does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this. **Do not paste
+        enrollment tokens, agent credentials, passwords or other secrets** —
+        remove them from logs and configuration files. Security problems:
+        see SECURITY.md (never in a public issue).
+
+        `inframole-agent dry-run` prints exactly what the agent would send —
+        useful to attach (review it first).
+  - type: input
+    id: version
+    attributes:
+      label: Agent version
+      description: "`inframole-agent version`"
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows Server 2022 / Ubuntu 24.04 (arm64)"
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: InfraMole server version
+      placeholder: "0.17.0"
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Event Viewer (Windows) or `journalctl -u inframole-agent` (Linux), secrets removed."
+      render: text

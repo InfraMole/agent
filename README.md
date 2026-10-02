@@ -5,8 +5,11 @@
 **Linux** (x86-64 and ARM64) that reports host facts, running services,
 listening ports and aggregated TCP connections to your InfraMole server every
 five minutes over HTTPS. It can also report web sites (IIS on Windows,
-nginx and Apache on Linux) and — only if you enable it locally — database
-names (SQL Server, PostgreSQL, MySQL / MariaDB), always without credentials.
+nginx and Apache on Linux) and their reverse-proxy targets, Docker
+containers and Compose projects and — only if you enable them locally —
+database names (SQL Server, PostgreSQL, MySQL / MariaDB), Kubernetes nodes
+and workloads, and hypervisor inventories (vCenter / ESXi, Hyper-V, Xen
+Orchestra — in preview), always without storing credentials on the server.
 
 **Open source under the [GNU AGPL v3.0 only](LICENSE)** (`AGPL-3.0-only`).
 
@@ -22,6 +25,10 @@ names (SQL Server, PostgreSQL, MySQL / MariaDB), always without credentials.
 Create an enrollment token in InfraMole (**Settings › Agents**) and run the
 commands it shows. Step by step, including proxies and Proxmox:
 **[inframole.com/docs/agent/install](https://inframole.com/docs/agent/install)**.
+
+Many machines at once: templates for Group Policy, Intune, Ansible and
+cloud-init in [`deploy/`](deploy/) — guide at
+**[inframole.com/docs/agent/mass-deployment](https://inframole.com/docs/agent/mass-deployment)**.
 
 ## Releases and verification
 
@@ -65,5 +72,6 @@ InfraMole name and logo are trademarks: [TRADEMARKS.md](TRADEMARKS.md).
 
 Copyright (C) 2026 Alejandro Galisteo.
 
-Contributing (CLA required): [CONTRIBUTING.md](CONTRIBUTING.md) · Security:
-[SECURITY.md](SECURITY.md).
+Changes: [CHANGELOG.md](CHANGELOG.md) · Contributing:
+[CONTRIBUTING.md](CONTRIBUTING.md) (pull requests need the one-time
+[CLA](CLA.md)) · Security: [SECURITY.md](SECURITY.md).

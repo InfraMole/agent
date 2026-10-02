@@ -1,59 +1,47 @@
 # Contributing to InfraMole
 
-> **We are not accepting external code contributions yet.** Our Contributor
-> License Agreement (below) is still under legal review, and we cannot merge
-> code without it. Pull requests from outside the project will be closed
-> without review for now — sorry!
->
-> What helps a lot today: **issues** — bug reports, questions, ideas and
-> feedback on the documentation. Security problems: see `SECURITY.md`.
->
-> This notice will be removed once the CLA is final.
+Thank you for your interest in InfraMole! Bug reports, ideas, documentation
+fixes and code are all welcome.
 
-Thank you for your interest in InfraMole!
+## Issues
 
-## Before you open a pull request
+- **Bugs**: open an issue with the _Bug report_ form — version, how you run
+  InfraMole, steps to reproduce. Never paste tokens, passwords or other
+  secrets; remove them from logs and screenshots.
+- **Ideas**: the _Feature request_ form. Tell us the problem first; the
+  solution can come later.
+- **Security problems**: never in a public issue — see
+  [SECURITY.md](SECURITY.md).
+
+## Pull requests
 
 1. **Open an issue first** for anything larger than a small fix, so we can
-   agree on the approach.
+   agree on the approach before you spend time on it.
 2. Keep the product principles: read-only towards infrastructure (no remote
-   command execution), no secrets or personal data collected, never present a
-   suggestion as a confirmed dependency.
-3. Run the checks described in the README; add tests for new behaviour.
-4. Add `// SPDX-License-Identifier: AGPL-3.0-only` at the top of new source
-   files.
+   command execution), no secrets or personal data collected, and a
+   suggestion is never presented as a confirmed dependency.
+3. Run the checks described in the README and add tests for new behaviour.
+4. Start new source files with `SPDX-License-Identifier: AGPL-3.0-only`.
+5. Describe user-visible changes; maintainers add them to `CHANGELOG.md`.
 
-## Contributor License Agreement (required)
+## Contributor License Agreement
 
 InfraMole is licensed under the **AGPL-3.0-only**, and Alejandro Galisteo
 also offers it under a **commercial licence** to organisations that cannot
-accept the AGPL. To keep that possible, every contribution must be covered by
-a Contributor License Agreement:
+accept the AGPL. To keep that possible, every contribution needs the
+[Contributor License Agreement](CLA.md) (CLA). In short: you keep the
+copyright in your work, you allow it to be distributed under the AGPL and
+under commercial terms, and every contribution included in a release is
+always also available under the AGPL or another OSI-approved licence.
 
-> By submitting a contribution (a pull request, patch or any other material)
-> to this repository, you certify that you wrote it or have the right to
-> submit it, and you grant Alejandro Galisteo and its successors a
-> perpetual, worldwide, non-exclusive, royalty-free, irrevocable licence to
-> use, reproduce, modify, sublicense and distribute your contribution under
-> the AGPL-3.0-only **and under other licence terms, including proprietary
-> commercial licences**. You keep the copyright in your contribution, and it
-> will always also be available under the AGPL-3.0-only.
-
-Pull requests are only merged when the author has agreed to this CLA (the
-pull request template asks you to confirm it).
-
-**Draft — pending legal review.** Until the CLA text is final, we may ask you
-to confirm again before merging.
+When you open your first pull request, a check asks you to accept it by
+posting one sentence as a comment. You only do it once.
 
 ## Third-party code
 
 Do not copy code from other projects unless its licence is permissive and
 compatible with the AGPL (MIT, BSD, ISC, Apache-2.0…) and you keep its
 notice. New dependencies must be listed with their licence in `NOTICE`.
-Copyleft dependencies other than the (L)GPL family, and anything "source
-available" (BSL, SSPL, Commons Clause…), are not accepted: they would prevent
-the commercial licence.
-
-## Security issues
-
-Do **not** open a public issue. See `SECURITY.md`.
+Copyleft dependencies other than the LGPL, and anything "source available"
+(BSL, SSPL, Commons Clause…), are not accepted: they would prevent the
+commercial licence.

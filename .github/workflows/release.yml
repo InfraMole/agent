@@ -89,6 +89,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Release notes: this version's section of CHANGELOG.md.
+          awk -v v="${GITHUB_REF_NAME#v}" 'index($0, "## " v " ") == 1 {f = 1; next} f && /^## / {exit} f' CHANGELOG.md > notes.md
+          printf '\n---\n\nVerify before installing: see the README, "Releases and verification" (sha256sum -c SHA256SUMS; cosign verify-blob; gh attestation verify). Licence: AGPL-3.0-only.\n' >> notes.md
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "InfraMole agent ${GITHUB_REF_NAME#v}" \
-            --notes "Licence: AGPL-3.0-only. Verify: see README, Releases and verification (sha256sum -c SHA256SUMS; cosign verify-blob; gh attestation verify)."
+            --notes-file notes.md
