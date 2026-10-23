@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/InfraMole/agent/internal/config"
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
@@ -122,7 +123,7 @@ func (p *Proxmox) Collect(ctx context.Context) (*protocol.Inventory, error) {
 	defer res.Body.Close()
 	switch {
 	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
-		return nil, fmt.Errorf("proxmox: %s (check the token and that it has PVEAuditor on /)", res.Status)
+		return nil, fmt.Errorf("proxmox: %w: %s (check the token and that it has PVEAuditor on /)", health.ErrAccessDenied, res.Status)
 	case res.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("proxmox: unexpected %s", res.Status)
 	}

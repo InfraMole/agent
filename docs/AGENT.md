@@ -25,18 +25,19 @@ self-update.
 
 ## 3. What is collected
 
-| Data                                                     | Windows                                                                      | Linux                            |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------- |
-| hostname, FQDN, OS name/version, kernel, arch, boot time | gopsutil host + `GetComputerNameEx`                                          | gopsutil host + DNS              |
-| machine id (enrollment only)                             | MachineGuid                                                                  | `/etc/machine-id`                |
-| interfaces (name, MAC, CIDR addresses), loopback skipped | gopsutil                                                                     | gopsutil                         |
-| running services (name, display name, state, start type) | SCM, minimal rights (`SC_MANAGER_ENUMERATE_SERVICE`, `SERVICE_QUERY_CONFIG`) | systemd (no start type)          |
-| listening TCP sockets + owning process name/path         | gopsutil (IP Helper)                                                         | gopsutil (`/proc/net/tcp*`)      |
-| established TCP connections, aggregated (see §4)         | same                                                                         | same                             |
-| IIS sites (name, http/https bindings) — M16, §6c         | `applicationHost.config` (sites section only)                                | —                                |
-| SQL Server database names (opt-in) — M16, §6c            | local instances, integrated auth, `sys.databases`                            | —                                |
-| nginx / Apache sites (names, ports) — M20, §6d           | —                                                                            | config files (sites only)        |
-| PostgreSQL / MySQL database names (opt-in) — M20, §6d    | —                                                                            | local socket, peer / socket auth |
+| Data                                                     | Windows                                                                      | Linux                                                              |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| hostname, FQDN, OS name/version, kernel, arch, boot time | gopsutil host + `GetComputerNameEx`                                          | gopsutil host + DNS                                                |
+| machine id (enrollment only)                             | MachineGuid                                                                  | `/etc/machine-id`                                                  |
+| interfaces (name, MAC, CIDR addresses), loopback skipped | gopsutil                                                                     | gopsutil                                                           |
+| running services (name, display name, state, start type) | SCM, minimal rights (`SC_MANAGER_ENUMERATE_SERVICE`, `SERVICE_QUERY_CONFIG`) | systemd (no start type)                                            |
+| listening TCP sockets + owning process name/path         | gopsutil (IP Helper)                                                         | gopsutil (`/proc/net/tcp*`)                                        |
+| established TCP connections, aggregated (see §4)         | same                                                                         | same                                                               |
+| IIS sites (name, http/https bindings) — M16, §6c         | `applicationHost.config` (sites section only)                                | —                                                                  |
+| SQL Server database names (opt-in) — M16, §6c            | local instances, integrated auth, `sys.databases`                            | —                                                                  |
+| nginx / Apache sites (names, ports) — M20, §6d           | —                                                                            | config files (sites only)                                          |
+| PostgreSQL / MySQL database names (opt-in) — M20, §6d    | —                                                                            | local socket, peer / socket auth                                   |
+| configured DNS servers (addresses only) — M39            | `GetAdaptersAddresses`, adapters that are up                                 | `resolv.conf` (systemd-resolved upstreams when the stub is listed) |
 
 ### Never collected
 
@@ -63,7 +64,11 @@ process name)` with `count`, `firstSeen`, `lastSeen`; drop loopback,
   `remotePort = 0`), else outbound (`localPort = 0`, report `remotePort`).
 - Report every `reportIntervalSec` (default 300 s, clamped [60, 3600]); the
   first report is sent right after start so the host appears immediately.
-- A failed report drops its window (the next one covers a new window).
+- A failed report keeps its window (M39): its connections are merged back
+  into the aggregator (counts add up, first/last seen widen, the window
+  starts at the earlier start) and go with the next report — in memory and
+  within the 2000 limit. Not on a 422 (the same content would be refused
+  again) or a 401. A restart starts a new window.
 - Max 2000 aggregated connections per window (`truncated: true` beyond).
 
 ## 5. Protocol v1
@@ -99,7 +104,29 @@ rotates its secret (old secret → 401).
 `POST /api/agent/v1/report` with `Authorization: Bearer dmp_agt_…`
 (rate limit 10/min/agent, body ≤ 1 MB): see the JSON Schema. Top level:
 `schemaVersion, agentVersion, collectedAt, windowStart, host, interfaces[],
-services[], listeners[], connections[], truncated?`.
+services[], listeners[], connections[], truncated?, issues?`.
+
+**Collection issues ✅ M39** (feature `"collection-issues"`): `issues` lists
+the collectors that failed — `{collector, error}` with `collector` from
+`AGENT_COLLECTORS` (sockets, host, interfaces, services, iis, nginx, apache,
+haproxy, sqlserver, postgresql, mysql, docker, proxmox, vcenter, hyperv,
+xenorchestra, kubernetes, dns) and `error` one of `access-denied`,
+`timeout`, `unreachable`, `failed` (`internal/health.Classify`; wrap
+`health.ErrAccessDenied` for rejected credentials). Never the error text:
+it can carry paths, host or user names. Host collectors (and a failed
+socket sample) cover the report's window; workloads and inventories keep
+their latest run's outcome until they succeed. "Not installed" is not an
+issue. Sent only after the server listed the feature (never with `run
+--once`); a 422 on a report carrying issues stops them for the run. Adding
+a collector name is a protocol change: an older server rejects it.
+
+**DNS servers ✅ M39** (feature `"dns-servers"`): `dnsServers` lists the
+resolvers the host is configured to use, at most 8, every report. Windows:
+the DNS servers of adapters that are up; Linux: `nameserver` lines of
+`/etc/resolv.conf`, or of `/run/systemd/resolve/resolv.conf` when the
+first lists only the local stub. Loopback, link-local, unspecified,
+multicast and `fec0::/10` (Windows defaults) are dropped. Absent = not
+collected; `[]` = none configured. A read error becomes a `dns` issue.
 → `202 { "config": {…} }` · `401` (unknown/revoked → the agent stops
 reporting) · `413` · `415` · `422` (invalid or unsupported schema version) ·
 `429` (agent waits `Retry-After`).
@@ -380,7 +407,8 @@ Future: Linux capabilities instead of root.
 ## 9. Not yet done
 
 - Self-update (needs a signed manifest; ADR first).
-- Persisting a failed report window for retry.
+- Persisting a failed report window across agent restarts (M39 keeps it in
+  memory only).
 
 ## 10. Releases & verification ✅ M8b
 

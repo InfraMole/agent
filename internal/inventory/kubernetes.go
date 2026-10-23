@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/InfraMole/agent/internal/config"
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
@@ -218,7 +219,7 @@ func list[T any](ctx context.Context, k *Kubernetes, path string, optional bool)
 		case err != nil:
 			return nil, fmt.Errorf("kubernetes: %w", err)
 		case res.StatusCode == http.StatusUnauthorized:
-			return nil, errors.New("kubernetes: 401 — the token was rejected")
+			return nil, fmt.Errorf("kubernetes: %w: 401 — the token was rejected", health.ErrAccessDenied)
 		case res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusNotFound:
 			if optional {
 				return nil, nil

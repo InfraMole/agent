@@ -5,6 +5,7 @@ package collect
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"time"
 
@@ -17,6 +18,10 @@ import (
 func Services(ctx context.Context) ([]protocol.Service, error) {
 	path, err := exec.LookPath("systemctl")
 	if err != nil {
+		return []protocol.Service{}, nil
+	}
+	// systemd not running (e.g. a container): nothing to list, not a failure (sd_booted).
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
 		return []protocol.Service{}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

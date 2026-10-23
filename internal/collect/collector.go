@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
@@ -18,6 +19,8 @@ type Collector struct {
 
 	mu        sync.Mutex
 	listeners []protocol.Listener // from the most recent sample
+	sampleErr error               // last failed sample of this window (M39)
+	issues    health.Set
 }
 
 func NewCollector(version string, log *slog.Logger) *Collector {
@@ -29,6 +32,9 @@ func (c *Collector) Sample(ctx context.Context) {
 	sockets, err := Sockets(ctx)
 	if err != nil {
 		c.log.Warn("sample sockets", "err", err)
+		c.mu.Lock()
+		c.sampleErr = err
+		c.mu.Unlock()
 		return
 	}
 	resolve := NewProcessResolver(ctx)
@@ -41,27 +47,50 @@ func (c *Collector) Sample(ctx context.Context) {
 }
 
 // Build assembles a report from fresh host facts and the aggregated window,
-// then starts a new window. Collection errors degrade to empty sections.
+// then starts a new window. Collection errors degrade to empty sections and
+// are named in the report's issues (M39; sent only to a server that accepts
+// them — see runner).
 func (c *Collector) Build(ctx context.Context) protocol.Report {
 	now := time.Now().UTC()
 	h, _, err := HostInfo(ctx)
 	if err != nil {
 		c.log.Warn("host info", "err", err)
 	}
+	c.issues.Record(protocol.CollectorHost, err)
 	ifaces, err := Interfaces(ctx)
 	if err != nil {
 		c.log.Warn("interfaces", "err", err)
 	}
+	c.issues.Record(protocol.CollectorInterfaces, err)
 	services, err := Services(ctx)
 	if err != nil {
 		c.log.Warn("services", "err", err)
 	}
+	c.issues.Record(protocol.CollectorServices, err)
+	dns, found, err := DNSServers(ctx)
+	if err != nil {
+		c.log.Warn("dns servers", "err", err)
+	}
+	c.issues.Record(protocol.CollectorDNS, err)
 	c.mu.Lock()
 	listeners := c.listeners
+	c.issues.Record(protocol.CollectorSockets, c.sampleErr)
+	c.sampleErr = nil
 	c.mu.Unlock()
 	conns, windowStart, truncated := c.agg.Flush(now)
 
-	return Assemble(c.version, now, windowStart, h, ifaces, services, listeners, conns, truncated)
+	r := Assemble(c.version, now, windowStart, h, ifaces, services, listeners, conns, truncated)
+	r.Issues = c.issues.List()
+	if found && err == nil {
+		r.DNSServers = &dns
+	}
+	return r
+}
+
+// Restore keeps the connections of a report that could not be sent for the
+// next one (M39). The host facts are collected fresh anyway.
+func (c *Collector) Restore(r protocol.Report) {
+	c.agg.Restore(r.Connections, r.WindowStart, r.Truncated)
 }
 
 // Assemble applies the protocol limits and guarantees non-nil slices (the

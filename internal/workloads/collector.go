@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/InfraMole/agent/internal/config"
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
@@ -22,6 +23,7 @@ type Collector struct {
 	interval time.Duration
 	last     time.Time
 	log      *slog.Logger
+	issues   health.Set // outcome of the latest collection of each kind (M39)
 }
 
 // New returns nil on hosts without anything to collect (unsupported OS, or
@@ -46,9 +48,10 @@ func New(c *config.Collectors, log *slog.Logger) *Collector {
 }
 
 // Due collects when the interval has elapsed. Each kind is independent: a
-// failure leaves that kind out (the server then keeps what it knew) and is
-// logged locally; it never blocks the host report. A kind whose software is
-// not installed is left out too.
+// failure leaves that kind out (the server then keeps what it knew), is
+// logged locally and kept in Issues until that kind succeeds; it never
+// blocks the host report. A kind whose software is not installed is left
+// out too, without an issue.
 func (c *Collector) Due(ctx context.Context, now time.Time) *protocol.Workloads {
 	if c == nil || (!c.last.IsZero() && now.Sub(c.last) < c.interval) {
 		return nil
@@ -56,22 +59,22 @@ func (c *Collector) Due(ctx context.Context, now time.Time) *protocol.Workloads 
 	c.last = now
 	out := &protocol.Workloads{CollectedAt: now.UTC().Truncate(time.Second)}
 	if c.web {
-		out.IISSites = c.sites("IIS sites", iisSites)
-		out.NginxSites = c.sites("nginx sites", nginxSites)
-		out.ApacheSites = c.sites("Apache sites", apacheSites)
-		out.HAProxySites = c.sites("HAProxy frontends", haproxySites)
+		out.IISSites = c.sites(protocol.CollectorIIS, "IIS sites", iisSites)
+		out.NginxSites = c.sites(protocol.CollectorNginx, "nginx sites", nginxSites)
+		out.ApacheSites = c.sites(protocol.CollectorApache, "Apache sites", apacheSites)
+		out.HAProxySites = c.sites(protocol.CollectorHAProxy, "HAProxy frontends", haproxySites)
 	}
 	if c.mssql {
-		out.SQLDatabases = c.databases(ctx, "SQL Server databases", func(ctx context.Context) ([]protocol.Database, bool, error) {
+		out.SQLDatabases = c.databases(ctx, protocol.CollectorSQLServer, "SQL Server databases", func(ctx context.Context) ([]protocol.Database, bool, error) {
 			dbs, err := sqlDatabases(ctx)
 			return dbs, true, err
 		})
 	}
 	if c.postgres {
-		out.PostgresDatabases = c.databases(ctx, "PostgreSQL databases", postgresDatabases)
+		out.PostgresDatabases = c.databases(ctx, protocol.CollectorPostgreSQL, "PostgreSQL databases", postgresDatabases)
 	}
 	if c.mysql {
-		out.MySQLDatabases = c.databases(ctx, "MySQL databases", mysqlDatabases)
+		out.MySQLDatabases = c.databases(ctx, protocol.CollectorMySQL, "MySQL databases", mysqlDatabases)
 	}
 	if c.docker {
 		out.Containers = c.containers(ctx)
@@ -82,8 +85,17 @@ func (c *Collector) Due(ctx context.Context, now time.Time) *protocol.Workloads 
 	return out
 }
 
-func (c *Collector) sites(label string, collect func() ([]protocol.WebSite, bool, error)) *[]protocol.WebSite {
+// Issues: the kinds whose latest collection failed (nil-safe).
+func (c *Collector) Issues() []protocol.Issue {
+	if c == nil {
+		return nil
+	}
+	return c.issues.List()
+}
+
+func (c *Collector) sites(collector, label string, collect func() ([]protocol.WebSite, bool, error)) *[]protocol.WebSite {
 	sites, found, err := collect()
+	c.issues.Record(collector, err)
 	switch {
 	case err != nil:
 		c.log.Warn(label+" not collected", "err", err)
@@ -102,10 +114,11 @@ func (c *Collector) sites(label string, collect func() ([]protocol.WebSite, bool
 
 func (c *Collector) databases(
 	ctx context.Context,
-	label string,
+	collector, label string,
 	collect func(context.Context) ([]protocol.Database, bool, error),
 ) *[]protocol.Database {
 	dbs, found, err := collect(ctx)
+	c.issues.Record(collector, err)
 	switch {
 	case err != nil:
 		c.log.Warn(label+" not collected", "err", err)
@@ -130,6 +143,7 @@ func (c *Collector) databases(
 
 func (c *Collector) containers(ctx context.Context) *[]protocol.Container {
 	list, found, err := dockerContainers(ctx)
+	c.issues.Record(protocol.CollectorDocker, err)
 	switch {
 	case err != nil:
 		c.log.Warn("Docker containers not collected", "err", err)

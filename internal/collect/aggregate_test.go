@@ -95,3 +95,40 @@ func TestAggregatorTruncates(t *testing.T) {
 		t.Fatalf("want 2 conns + truncated, got %d %v", len(conns), truncated)
 	}
 }
+
+func TestAggregatorRestoreKeepsAFailedWindow(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := NewAggregator(t0)
+	sql := []Socket{{LocalIP: "10.0.0.23", LocalPort: 50000, RemoteIP: "10.0.0.40", RemotePort: 1433, Status: "ESTABLISHED", PID: 10}}
+	a.Add(sql, procs, t0.Add(30*time.Second))
+	a.Add(sql, procs, t0.Add(60*time.Second))
+	failed, start, _ := a.Flush(t0.Add(5 * time.Minute)) // the report is not delivered
+
+	// The next window sees the same connection once and a new one.
+	a.Add(append(sql, Socket{LocalIP: "10.0.0.23", LocalPort: 50001, RemoteIP: "10.0.0.41", RemotePort: 443, Status: "ESTABLISHED"}), procs, t0.Add(6*time.Minute))
+	a.Restore(failed, start, false)
+
+	conns, windowStart, truncated := a.Flush(t0.Add(10 * time.Minute))
+	if !windowStart.Equal(t0) || truncated {
+		t.Fatalf("window must start at the failed report's start: %s, truncated %v", windowStart, truncated)
+	}
+	if len(conns) != 2 {
+		t.Fatalf("want 2 connections, got %+v", conns)
+	}
+	c := conns[0] // sorted by count
+	if c.RemoteAddress != "10.0.0.40" || c.Count != 3 || !c.FirstSeen.Equal(t0.Add(30*time.Second)) || !c.LastSeen.Equal(t0.Add(6*time.Minute)) {
+		t.Fatalf("merged connection wrong: %+v", c)
+	}
+}
+
+func TestAggregatorRestoreRespectsTheLimit(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := NewAggregator(t0)
+	a.max = 1
+	a.Add([]Socket{{LocalIP: "10.0.0.23", LocalPort: 50000, RemoteIP: "10.0.0.40", RemotePort: 1433, Status: "ESTABLISHED"}}, procs, t0)
+	a.Restore([]protocol.Connection{{Proto: "tcp", Direction: "outbound", RemoteAddress: "10.0.0.99", RemotePort: 22, Count: 1, FirstSeen: t0, LastSeen: t0}}, t0, false)
+	conns, _, truncated := a.Flush(t0.Add(time.Minute))
+	if len(conns) != 1 || !truncated {
+		t.Fatalf("over the limit: want 1 connection and truncated, got %d / %v", len(conns), truncated)
+	}
+}

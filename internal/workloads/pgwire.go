@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/InfraMole/agent/internal/health"
 )
 
 // ErrPasswordRequired: the server wants a password; the agent never has one
 // (it only uses peer / socket authentication — no credentials stored).
-var ErrPasswordRequired = errors.New("the server asked for a password; allow the agent's user with peer / socket authentication")
+var ErrPasswordRequired = fmt.Errorf("%w: the server asked for a password; allow the agent's user with peer / socket authentication", health.ErrAccessDenied)
 
 // pgListDatabases speaks the minimum of the PostgreSQL v3 protocol over an
 // already-open local socket: startup as `user` (peer authentication), one

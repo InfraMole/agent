@@ -38,7 +38,9 @@ func GoldenReport() Report {
 			{Proto: "tcp", Direction: "inbound", LocalPort: 443, RemoteAddress: "10.0.1.5",
 				Count: 3, FirstSeen: t0, LastSeen: t0.Add(60 * time.Second)},
 		},
-		Truncated: true,
+		Truncated:  true,
+		Issues:     []Issue{{Collector: CollectorServices, Error: IssueAccessDenied}},
+		DNSServers: &[]string{"10.0.0.53", "2001:db8::53"},
 		Inventory: &Inventory{
 			Source: "proxmox", CollectedAt: t0.Add(5 * time.Minute),
 			Items: []InventoryItem{

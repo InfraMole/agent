@@ -12,6 +12,7 @@ import (
 	"github.com/InfraMole/agent/internal/client"
 	"github.com/InfraMole/agent/internal/collect"
 	"github.com/InfraMole/agent/internal/config"
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/inventory"
 	"github.com/InfraMole/agent/internal/protocol"
 	"github.com/InfraMole/agent/internal/update"
@@ -40,6 +41,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 	col := collect.NewCollector(opts.Version, log)
 	inv := NewInventory(cfg, log)
 	wl := &serverWorkloads{col: workloads.New(cfg.Collectors, log)}
+	sf := &serverFeatures{}
 	conf := protocol.ClampConfig(protocol.Config{
 		ReportIntervalSec: orDefault(cfg.ReportIntervalSec, protocol.DefaultReportEvery),
 		SampleIntervalSec: orDefault(cfg.SampleIntervalSec, protocol.DefaultSampleEvery),
@@ -49,6 +51,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 		Sample(ctx, col, opts.Window)
 		report := col.Build(ctx)
 		report.Inventory = inv.Due(ctx, time.Now())
+		report.Issues, report.DNSServers = nil, nil // not negotiated: an older server rejects them
 		_, err := c.Report(ctx, cfg.AgentSecret, report)
 		if err == nil {
 			log.Info("report sent")
@@ -72,7 +75,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 
 	// First report right away so the host shows up immediately.
 	col.Sample(ctx)
-	next, err := send(ctx, c, cfg, col, inv, wl, log)
+	next, err := send(ctx, c, cfg, col, inv, wl, sf, log)
 	if errors.Is(err, client.ErrUnauthorized) {
 		return err
 	}
@@ -101,7 +104,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 		case <-sampleT.C:
 			col.Sample(ctx)
 		case <-reportT.C:
-			next, err := send(ctx, c, cfg, col, inv, wl, log)
+			next, err := send(ctx, c, cfg, col, inv, wl, sf, log)
 			var rl *client.RateLimitedError
 			switch {
 			case errors.Is(err, client.ErrUnauthorized):
@@ -110,7 +113,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 				log.Warn("rate limited by server", "retryAfter", rl.RetryAfter)
 				reportT.Reset(rl.RetryAfter)
 			case err != nil:
-				// The window is dropped; the next report covers a new window.
+				// The window's connections go with the next report (send).
 				log.Warn("report failed", "err", err)
 			case !confirmed:
 				update.Confirm(exe)
@@ -152,14 +155,43 @@ func Sample(ctx context.Context, col *collect.Collector, window time.Duration) {
 	}
 }
 
-func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.Collector, inv *Inventory, wl *serverWorkloads, log *slog.Logger) (*protocol.Config, error) {
+// serverFeatures: optional report fields negotiated with the server.
+type serverFeatures struct {
+	issues         bool // the server accepts Report.Issues (M39)
+	issuesDisabled bool // the server rejected a report carrying them in this run
+	dns            bool // the server accepts Report.DNSServers (M39)
+	dnsDisabled    bool
+}
+
+func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.Collector, inv *Inventory, wl *serverWorkloads, sf *serverFeatures, log *slog.Logger) (*protocol.Config, error) {
 	report := col.Build(ctx)
 	report.Inventory = inv.Due(ctx, time.Now())
 	report.Hypervisors = inv.DueHypervisors(ctx, time.Now(), false)
 	report.Kubernetes = inv.DueKubernetes(ctx, time.Now(), false)
 	report.Workloads = wl.due(ctx, time.Now())
+	if sf.issues && !sf.issuesDisabled {
+		report.Issues = health.Merge(report.Issues, wl.col.Issues(), inv.Issues())
+	} else {
+		report.Issues = nil // an older server rejects the field
+	}
+	if !sf.dns || sf.dnsDisabled {
+		report.DNSServers = nil
+	}
 	res, err := c.Report(ctx, cfg.AgentSecret, report)
 	if err != nil {
+		if errors.Is(err, client.ErrRejected) {
+			if len(report.Issues) > 0 {
+				sf.issuesDisabled = true
+				log.Warn("server rejected a report with collection issues; not sending them again until restart", "err", err)
+			}
+			if report.DNSServers != nil {
+				sf.dnsDisabled = true
+				log.Warn("server rejected a report with DNS servers; not sending them again until restart", "err", err)
+			}
+		} else if !errors.Is(err, client.ErrUnauthorized) {
+			// M39: not lost — these connections go with the next report.
+			col.Restore(report)
+		}
 		if report.Inventory != nil {
 			inv.Retry() // the inventory was lost with the report
 		}
@@ -191,6 +223,8 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 		}
 		return nil, err
 	}
+	sf.issues = hasFeature(res.Features, protocol.FeatureIssues)
+	sf.dns = hasFeature(res.Features, protocol.FeatureDNSServers)
 	wl.accepted = !wl.disabled && hasFeature(res.Features, protocol.FeatureWorkloads)
 	wl.linux = hasFeature(res.Features, protocol.FeatureWorkloadsLinux)
 	wl.docker = hasFeature(res.Features, protocol.FeatureContainers)
@@ -198,7 +232,7 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	inv.negotiated(res.Features)
 	log.Info("report sent", "connections", len(report.Connections), "listeners", len(report.Listeners),
 		"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil, "hypervisors", len(report.Hypervisors),
-		"workloads", report.Workloads != nil)
+		"workloads", report.Workloads != nil, "issues", len(report.Issues), "dnsServers", report.DNSServers != nil)
 	return &res.Config, nil
 }
 
@@ -271,6 +305,7 @@ type Inventory struct {
 	k8s         *hypervisorCollector[protocol.Kubernetes]
 	k8sAccepted bool
 	k8sDisabled bool
+	issues      health.Set // outcome of each collector's latest run (M39)
 	log         *slog.Logger
 }
 
@@ -283,12 +318,13 @@ type hypervisorCollector[T any] struct {
 }
 
 // due runs the collector when its interval has elapsed (nil otherwise or on error).
-func (h *hypervisorCollector[T]) due(ctx context.Context, now time.Time, log *slog.Logger) *T {
+func (h *hypervisorCollector[T]) due(ctx context.Context, now time.Time, issues *health.Set, log *slog.Logger) *T {
 	if h == nil || (!h.last.IsZero() && now.Sub(h.last) < h.interval) {
 		return nil
 	}
 	h.last = now
 	out, err := h.collect(ctx)
+	issues.Record(h.source, err)
 	if err != nil {
 		log.Warn(h.source+" inventory failed", "err", err)
 		return nil
@@ -321,15 +357,15 @@ func NewInventory(cfg *config.File, log *slog.Logger) *Inventory {
 	}
 	if c.VCenter != nil {
 		v, err := inventory.NewVCenter(*c.VCenter)
-		add("vcenter", c.VCenter.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return v.Collect(ctx) }, err)
+		add(protocol.CollectorVCenter, c.VCenter.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return v.Collect(ctx) }, err)
 	}
 	if c.XenOrchestra != nil {
 		x, err := inventory.NewXenOrchestra(*c.XenOrchestra)
-		add("xenorchestra", c.XenOrchestra.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return x.Collect(ctx) }, err)
+		add(protocol.CollectorXenOrchestra, c.XenOrchestra.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return x.Collect(ctx) }, err)
 	}
 	if c.HyperV != nil {
 		h, err := inventory.NewHyperV()
-		add("hyperv", c.HyperV.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return h.Collect(ctx) }, err)
+		add(protocol.CollectorHyperV, c.HyperV.IntervalSec, func(ctx context.Context) (*protocol.Hypervisor, error) { return h.Collect(ctx) }, err)
 	}
 	if c.Kubernetes != nil {
 		if k, err := inventory.NewKubernetes(*c.Kubernetes); err != nil {
@@ -337,7 +373,7 @@ func NewInventory(cfg *config.File, log *slog.Logger) *Inventory {
 		} else {
 			interval := config.ClampInterval(c.Kubernetes.IntervalSec)
 			log.Info("kubernetes collector enabled", "cluster", c.Kubernetes.Cluster, "every", interval)
-			inv.k8s = &hypervisorCollector[protocol.Kubernetes]{source: "kubernetes", collect: k.Collect, interval: interval}
+			inv.k8s = &hypervisorCollector[protocol.Kubernetes]{source: protocol.CollectorKubernetes, collect: k.Collect, interval: interval}
 		}
 	}
 	if inv.proxmox == nil && len(inv.hypervisors) == 0 && inv.k8s == nil {
@@ -354,11 +390,20 @@ func (i *Inventory) Due(ctx context.Context, now time.Time) *protocol.Inventory 
 	}
 	i.last = now
 	out, err := i.proxmox.Collect(ctx)
+	i.issues.Record(protocol.CollectorProxmox, err)
 	if err != nil {
 		i.log.Warn("proxmox inventory failed", "err", err)
 		return nil
 	}
 	return out
+}
+
+// Issues: the collectors whose latest run failed (nil-safe).
+func (i *Inventory) Issues() []protocol.Issue {
+	if i == nil {
+		return nil
+	}
+	return i.issues.List()
 }
 
 func (i *Inventory) Retry() {
@@ -375,7 +420,7 @@ func (i *Inventory) DueHypervisors(ctx context.Context, now time.Time, force boo
 	}
 	var out []protocol.Hypervisor
 	for _, h := range i.hypervisors {
-		if inv := h.due(ctx, now, i.log); inv != nil {
+		if inv := h.due(ctx, now, &i.issues, i.log); inv != nil {
 			out = append(out, *inv)
 		}
 	}
@@ -387,7 +432,7 @@ func (i *Inventory) DueKubernetes(ctx context.Context, now time.Time, force bool
 	if i == nil || (!force && (!i.k8sAccepted || i.k8sDisabled)) {
 		return nil
 	}
-	return i.k8s.due(ctx, now, i.log)
+	return i.k8s.due(ctx, now, &i.issues, i.log)
 }
 
 // RetryHypervisors: the collections were lost with a failed report.

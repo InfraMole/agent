@@ -83,6 +83,49 @@ const MaxUpstreams = 32
 // FeatureHypervisors: the server accepts Report.Hypervisors (M24).
 const FeatureHypervisors = "hypervisors"
 
+// FeatureIssues: the server accepts Report.Issues (M39).
+const FeatureIssues = "collection-issues"
+
+// FeatureDNSServers: the server accepts Report.DNSServers (M39).
+const FeatureDNSServers = "dns-servers"
+
+// Collector names for Issue.Collector (M39), mirrored from the zod enum
+// AGENT_COLLECTORS. A name the server does not know gets the report rejected.
+const (
+	CollectorSockets      = "sockets"
+	CollectorHost         = "host"
+	CollectorInterfaces   = "interfaces"
+	CollectorServices     = "services"
+	CollectorIIS          = "iis"
+	CollectorNginx        = "nginx"
+	CollectorApache       = "apache"
+	CollectorHAProxy      = "haproxy"
+	CollectorSQLServer    = "sqlserver"
+	CollectorPostgreSQL   = "postgresql"
+	CollectorMySQL        = "mysql"
+	CollectorDocker       = "docker"
+	CollectorProxmox      = "proxmox"
+	CollectorVCenter      = "vcenter"
+	CollectorHyperV       = "hyperv"
+	CollectorXenOrchestra = "xenorchestra"
+	CollectorKubernetes   = "kubernetes"
+	CollectorDNS          = "dns"
+)
+
+// Issue categories (M39), mirrored from the zod enum COLLECTION_ERRORS.
+const (
+	IssueAccessDenied = "access-denied"
+	IssueTimeout      = "timeout"
+	IssueUnreachable  = "unreachable"
+	IssueFailed       = "failed"
+)
+
+// Issue: one collector that failed (M39) — a category, never the error text.
+type Issue struct {
+	Collector string `json:"collector"`
+	Error     string `json:"error"`
+}
+
 // Hypervisor limits enforced by the server.
 const (
 	MaxHypervisorHosts = 500
@@ -100,10 +143,14 @@ type Report struct {
 	Listeners     []Listener   `json:"listeners"`
 	Connections   []Connection `json:"connections"`
 	Truncated     bool         `json:"truncated,omitempty"`
-	Inventory     *Inventory   `json:"inventory,omitempty"`
-	Hypervisors   []Hypervisor `json:"hypervisors,omitempty"`
-	Kubernetes    *Kubernetes  `json:"kubernetes,omitempty"`
-	Workloads     *Workloads   `json:"workloads,omitempty"`
+	Issues        []Issue      `json:"issues,omitempty"`
+	// DNSServers (M39, FeatureDNSServers): configured resolvers. nil = not
+	// collected; an empty list = none configured.
+	DNSServers  *[]string    `json:"dnsServers,omitempty"`
+	Inventory   *Inventory   `json:"inventory,omitempty"`
+	Hypervisors []Hypervisor `json:"hypervisors,omitempty"`
+	Kubernetes  *Kubernetes  `json:"kubernetes,omitempty"`
+	Workloads   *Workloads   `json:"workloads,omitempty"`
 }
 
 // Kubernetes (M25): nodes and workloads of one cluster. Labels, env,

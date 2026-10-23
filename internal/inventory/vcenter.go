@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/InfraMole/agent/internal/config"
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
@@ -96,7 +97,7 @@ type soapClient struct {
 	http *http.Client
 }
 
-var errLogin = errors.New("vcenter: login failed — check the username and the password file")
+var errLogin = fmt.Errorf("vcenter: %w: login failed — check the username and the password file", health.ErrAccessDenied)
 
 type soapFault struct {
 	String string `xml:"faultstring"`

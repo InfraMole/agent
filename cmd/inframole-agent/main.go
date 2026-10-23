@@ -25,6 +25,7 @@ import (
 	"github.com/InfraMole/agent/internal/client"
 	"github.com/InfraMole/agent/internal/collect"
 	"github.com/InfraMole/agent/internal/config"
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 	"github.com/InfraMole/agent/internal/runner"
 	"github.com/InfraMole/agent/internal/update"
@@ -166,7 +167,10 @@ func cmdDryRun(args []string) error {
 	if cfg, err := config.Read(f.configPath); err == nil {
 		collectors = cfg.Collectors
 	}
-	report.Workloads = workloads.New(collectors, log).Due(ctx, time.Now())
+	wl := workloads.New(collectors, log)
+	report.Workloads = wl.Due(ctx, time.Now())
+	// What failed is shown too (a server receives it only once it accepts it).
+	report.Issues = health.Merge(report.Issues, wl.Issues(), inv.Issues())
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)

@@ -13,3 +13,6 @@ import (
 func Services(_ context.Context) ([]protocol.Service, error) { return []protocol.Service{}, nil }
 
 func fqdn(hostname string) string { return fqdnFromDNS(hostname) }
+
+// DNSServers is unsupported on this platform (Windows and Linux only).
+func DNSServers(_ context.Context) ([]string, bool, error) { return nil, false, nil }

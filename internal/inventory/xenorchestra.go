@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/InfraMole/agent/internal/config"
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
@@ -107,7 +108,7 @@ func (x *XenOrchestra) get(ctx context.Context, path string, out any) error {
 	defer res.Body.Close()
 	switch {
 	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("xenorchestra: %s (check the token; tokens expire — create a new one)", res.Status)
+		return fmt.Errorf("xenorchestra: %w: %s (check the token; tokens expire — create a new one)", health.ErrAccessDenied, res.Status)
 	case res.StatusCode != http.StatusOK:
 		return fmt.Errorf("xenorchestra: unexpected %s", res.Status)
 	}

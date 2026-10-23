@@ -144,6 +144,47 @@ func (a *Aggregator) Flush(now time.Time) (conns []protocol.Connection, windowSt
 	return conns, windowStart, truncated
 }
 
+// Restore puts back the connections of a report that could not be sent
+// (M39), so the next report still covers them: counts add up, first / last
+// seen widen, and the window starts at the earlier start. New entries
+// beyond the limit are dropped and the window is marked truncated.
+func (a *Aggregator) Restore(conns []protocol.Connection, windowStart time.Time, truncated bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if windowStart.Before(a.windowStart) {
+		a.windowStart = windowStart
+	}
+	a.truncated = a.truncated || truncated
+	for _, c := range conns {
+		key := connKey{direction: c.Direction, remote: c.RemoteAddress, port: c.RemotePort}
+		if c.Direction == "inbound" {
+			key.port = c.LocalPort
+		}
+		if c.Process != nil {
+			key.process = c.Process.Name
+		}
+		if existing, ok := a.entries[key]; ok {
+			existing.Count = min(existing.Count+c.Count, maxCount)
+			if c.FirstSeen.Before(existing.FirstSeen) {
+				existing.FirstSeen = c.FirstSeen
+			}
+			if c.LastSeen.After(existing.LastSeen) {
+				existing.LastSeen = c.LastSeen
+			}
+			continue
+		}
+		if len(a.entries) >= a.max {
+			a.truncated = true
+			continue
+		}
+		restored := c
+		a.entries[key] = &restored
+	}
+}
+
+// maxCount: the server accepts up to a million samples per connection.
+const maxCount = 1_000_000
+
 func isRemotePeer(ip string) bool {
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {

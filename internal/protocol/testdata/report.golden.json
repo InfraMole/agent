@@ -69,6 +69,16 @@
     }
   ],
   "truncated": true,
+  "issues": [
+    {
+      "collector": "services",
+      "error": "access-denied"
+    }
+  ],
+  "dnsServers": [
+    "10.0.0.53",
+    "2001:db8::53"
+  ],
   "inventory": {
     "source": "proxmox",
     "collectedAt": "2026-09-28T10:05:00Z",

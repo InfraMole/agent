@@ -4,6 +4,29 @@ What changed in each release of `inframole-agent`. Every release is signed:
 see the README, "Releases and verification". The agent is read-only and
 outbound-only in every version — the server cannot send it commands.
 
+## 0.7.0 — 2026-10-24
+
+### Added
+
+- **Incomplete reports are reported**: when a collector fails (services,
+  network interfaces, web servers, databases, Docker, Proxmox, vCenter,
+  Hyper-V, Xen Orchestra, Kubernetes), the report says which one and why —
+  access denied, timed out, unreachable or failed — so InfraMole can show
+  it. Only the name and the reason are sent, never the error text. Needs
+  InfraMole 0.30.0 or later; older servers keep working without it.
+  `dry-run` shows the same list under `issues`.
+
+- **DNS servers**: every report lists the DNS servers the host is
+  configured to use (addresses only), so InfraMole can suggest the
+  dependency on them. Needs InfraMole 0.30.0 or later.
+
+### Changed
+
+- **A report that cannot be delivered is no longer lost**: the connections
+  it saw go with the next report.
+- On Linux hosts without systemd (for example containers), services are no
+  longer read through `systemctl`.
+
 ## 0.6.1 — 2026-10-02
 
 ### Added
