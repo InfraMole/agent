@@ -5,6 +5,7 @@ package workloads
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/InfraMole/agent/internal/protocol"
 )
@@ -16,10 +17,16 @@ const (
 	onLinux   = false
 )
 
-func iisSites() ([]protocol.WebSite, bool, error)                          { return nil, false, nil }
-func nginxSites() ([]protocol.WebSite, bool, error)                        { return nil, false, nil }
-func apacheSites() ([]protocol.WebSite, bool, error)                       { return nil, false, nil }
-func haproxySites() ([]protocol.WebSite, bool, error)                      { return nil, false, nil }
-func sqlDatabases(context.Context) ([]protocol.Database, error)            { return nil, nil }
+func iisSites() ([]protocol.WebSite, bool, error)               { return nil, false, nil }
+func nginxSites() ([]protocol.WebSite, bool, error)             { return nil, false, nil }
+func apacheSites() ([]protocol.WebSite, bool, error)            { return nil, false, nil }
+func haproxySites() ([]protocol.WebSite, bool, error)           { return nil, false, nil }
+func sqlDatabases(context.Context) ([]protocol.Database, error) { return nil, nil }
+func sqlClients(context.Context) ([]protocol.DatabaseClient, bool, error) {
+	return nil, false, nil
+}
+
+// NewSiteResolver: IIS exists on Windows only (M42).
+func NewSiteResolver(*slog.Logger) func(int32, string) string              { return nil }
 func postgresDatabases(context.Context) ([]protocol.Database, bool, error) { return nil, false, nil }
 func mysqlDatabases(context.Context) ([]protocol.Database, bool, error)    { return nil, false, nil }

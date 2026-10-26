@@ -24,6 +24,10 @@ type Socket struct {
 // ProcessResolver maps a PID to a process reference (name + path, never args).
 type ProcessResolver func(pid int32) *protocol.ProcessRef
 
+// SiteResolver names the IIS site a process serves (M42), "" when unknown
+// or when its application pool serves several sites.
+type SiteResolver func(pid int32, processName string) string
+
 // Listeners returns the distinct listening sockets.
 func Listeners(sockets []Socket, resolve ProcessResolver) []protocol.Listener {
 	seen := map[string]bool{}
@@ -69,6 +73,7 @@ type connKey struct {
 	remote    string
 	port      uint32 // local port (inbound) or remote port (outbound)
 	process   string
+	site      string
 }
 
 // Aggregator accumulates established connections across samples so that a
@@ -80,11 +85,16 @@ type Aggregator struct {
 	windowStart time.Time
 	truncated   bool
 	max         int
+	site        SiteResolver // optional (M42)
 }
 
 func NewAggregator(now time.Time) *Aggregator {
 	return &Aggregator{entries: map[connKey]*protocol.Connection{}, windowStart: now, max: protocol.MaxConnections}
 }
+
+// WithSites makes Add attribute connections to IIS sites (M42). Call it
+// before the first sample.
+func (a *Aggregator) WithSites(site SiteResolver) { a.site = site }
 
 // Add records one sample. Loopback / link-local / unspecified peers are
 // dropped; direction is inbound when the local port has a listener.
@@ -109,6 +119,10 @@ func (a *Aggregator) Add(sockets []Socket, resolve ProcessResolver, now time.Tim
 		if ref != nil {
 			key.process = ref.Name
 			c.Process = &protocol.ProcessRef{Name: ref.Name, Path: ref.Path} // no PID: aggregated over time
+			if a.site != nil {
+				c.Site = a.site(s.PID, ref.Name)
+				key.site = c.Site
+			}
 		}
 		if existing, ok := a.entries[key]; ok {
 			existing.Count++
@@ -163,6 +177,7 @@ func (a *Aggregator) Restore(conns []protocol.Connection, windowStart time.Time,
 		if c.Process != nil {
 			key.process = c.Process.Name
 		}
+		key.site = c.Site
 		if existing, ok := a.entries[key]; ok {
 			existing.Count = min(existing.Count+c.Count, maxCount)
 			if c.FirstSeen.Before(existing.FirstSeen) {

@@ -4,6 +4,23 @@ What changed in each release of `inframole-agent`. Every release is signed:
 see the README, "Releases and verification". The agent is read-only and
 outbound-only in every version — the server cannot send it commands.
 
+## 0.8.0 — 2026-10-26
+
+### Added
+
+- **IIS site of a connection**: connections of an IIS worker process carry
+  the site it serves when its application pool serves only that site. The
+  agent asks IIS (`appcmd list wp`, read-only) which pool each worker runs;
+  pool names never leave the server. On by default with IIS; sent only to
+  servers 0.33.0 or later.
+- **SQL Server database clients** (off by default,
+  `"sqlServerClients": true`): which client IP addresses have sessions open
+  to which user database, with the server port and a session count — never
+  logins, client machine or program names, or queries. Needs `VIEW SERVER
+  STATE` (SQL Server 2022: `VIEW SERVER PERFORMANCE STATE`) for the agent's
+  login; without it the report says "access denied". Collected with every
+  report. `dry-run` shows both.
+
 ## 0.7.0 — 2026-10-24
 
 ### Added

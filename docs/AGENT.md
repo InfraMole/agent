@@ -35,6 +35,8 @@ self-update.
 | established TCP connections, aggregated (see §4)         | same                                                                         | same                                                               |
 | IIS sites (name, http/https bindings) — M16, §6c         | `applicationHost.config` (sites section only)                                | —                                                                  |
 | SQL Server database names (opt-in) — M16, §6c            | local instances, integrated auth, `sys.databases`                            | —                                                                  |
+| IIS site of a worker's connections — M42, §6c            | `appcmd list wp` + pools in `applicationHost.config` (pool names stay local) | —                                                                  |
+| SQL Server database clients (opt-in) — M42, §6c          | `sys.dm_exec_sessions` + `sys.dm_exec_connections` (needs VIEW SERVER STATE) | —                                                                  |
 | nginx / Apache sites (names, ports) — M20, §6d           | —                                                                            | config files (sites only)                                          |
 | PostgreSQL / MySQL database names (opt-in) — M20, §6d    | —                                                                            | local socket, peer / socket auth                                   |
 | configured DNS servers (addresses only) — M39            | `GetAdaptersAddresses`, adapters that are up                                 | `resolv.conf` (systemd-resolved upstreams when the stub is listed) |
@@ -110,7 +112,8 @@ services[], listeners[], connections[], truncated?, issues?`.
 the collectors that failed — `{collector, error}` with `collector` from
 `AGENT_COLLECTORS` (sockets, host, interfaces, services, iis, nginx, apache,
 haproxy, sqlserver, postgresql, mysql, docker, proxmox, vcenter, hyperv,
-xenorchestra, kubernetes, dns) and `error` one of `access-denied`,
+xenorchestra, kubernetes, dns; `sqlserver-clients` only with the feature
+`"database-clients"`) and `error` one of `access-denied`,
 `timeout`, `unreachable`, `failed` (`internal/health.Classify`; wrap
 `health.ErrAccessDenied` for rejected credentials). Never the error text:
 it can carry paths, host or user names. Host collectors (and a failed
@@ -127,6 +130,24 @@ the DNS servers of adapters that are up; Linux: `nameserver` lines of
 first lists only the local stub. Loopback, link-local, unspecified,
 multicast and `fec0::/10` (Windows defaults) are dropped. Absent = not
 collected; `[]` = none configured. A read error becomes a `dns` issue.
+
+**Site of a connection ✅ M42** (feature `"connection-sites"`, ADR-058):
+`connections[].site` names the IIS site whose worker process made or
+served the connection, only when that worker's application pool serves
+exactly one site. It is part of the aggregation key (two sites' workers
+calling the same SQL Server stay two entries). Dropped before sending to a
+server without the feature (and with `run --once`); a 422 on a report
+carrying sites stops them for the run. In practice outbound only: IIS
+accepts inbound HTTP in the kernel (`http.sys`, process System).
+
+**Database clients ✅ M42** (feature `"database-clients"`, ADR-058):
+`databaseClients[]` = `{engine: "mssql", instance, database, address,
+port, sessions}` — remote clients with sessions open to user databases,
+collected with **every report** (not on the workloads cadence) when
+`sqlServerClients` is on. Absent = not collected (off, SQL Server not
+installed, or the collection failed — then a `sqlserver-clients` issue);
+`[]` = no remote clients. Never logins, `host_name`, `program_name` or
+statements. At most 2000 rows, sessions capped at 100000.
 → `202 { "config": {…} }` · `401` (unknown/revoked → the agent stops
 reporting) · `413` · `415` · `422` (invalid or unsupported schema version) ·
 `429` (agent waits `Retry-After`).
@@ -315,6 +336,28 @@ database_id > 4`. No credentials are stored. The query was verified
   Discovery attributes a connection to a host port that exactly one workload
   listens on to that workload (`plan.ts#attributeToWorkload`), unless the
   host pair already has a relationship.
+- **Site of a connection ✅ M42** (on with IIS): `workloads.NewSiteResolver`
+  (Windows; nil without `appcmd.exe`) is wired into the connection
+  aggregator. For a `w3wp.exe` PID it runs `%windir%\System32\inetsrv\
+appcmd.exe list wp /xml` (worker id → pool; `ParseWorkerProcesses`, the
+  text form is accepted too) and `ParsePoolSites` on applicationHost.config
+  (`site/application@applicationPool`, else the site's
+  `applicationDefaults`, else the one of `<sites>`, else `DefaultAppPool`).
+  The listing runs when an unknown worker id appears, at most every 25 s,
+  and every 10 min; failures are logged once and keep the last answer.
+  Pool names never leave the process (`siteResolver`, unit tested).
+- **Database clients ✅ M42** (opt-in `"sqlServerClients": true`, implies
+  `sqlServer`): per instance, the permission is checked first
+  (`HAS_PERMS_BY_NAME` for `VIEW SERVER STATE`, then `VIEW SERVER
+PERFORMANCE STATE` for 2022; NULL / error = not granted →
+  `health.ErrAccessDenied`), then one query: user sessions to databases
+  with id > 4 over TCP, `COUNT(DISTINCT session_id)` grouped by database,
+  `client_net_address`, `local_tcp_port`, excluding the agent's own
+  session. `toClients` drops local transports, loopback and link-local
+  clients and merges IPv4-mapped duplicates. Verified against SQL Server
+  2022 in Docker (`go test -tags mssqllive -run Clients`): refused without
+  the permission, another session listed with either permission; on a real
+  Windows SQL Server still to check (field check).
 
 ### 6d. Linux workloads ✅ M20 (ADR-031)
 

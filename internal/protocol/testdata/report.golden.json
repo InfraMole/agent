@@ -53,6 +53,7 @@
         "name": "w3wp.exe",
         "path": "C:\\Windows\\System32\\inetsrv\\w3wp.exe"
       },
+      "site": "Portal",
       "count": 10,
       "firstSeen": "2026-09-28T10:00:00Z",
       "lastSeen": "2026-09-28T10:04:30Z"
@@ -78,6 +79,16 @@
   "dnsServers": [
     "10.0.0.53",
     "2001:db8::53"
+  ],
+  "databaseClients": [
+    {
+      "engine": "mssql",
+      "instance": "MSSQLSERVER",
+      "database": "Customers",
+      "address": "10.0.0.23",
+      "port": 1433,
+      "sessions": 4
+    }
   ],
   "inventory": {
     "source": "proxmox",

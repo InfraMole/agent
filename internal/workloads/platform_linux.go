@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"os"
 	"os/user"
@@ -27,6 +28,12 @@ const (
 // Windows workloads do not exist on Linux.
 func iisSites() ([]protocol.WebSite, bool, error)               { return nil, false, nil }
 func sqlDatabases(context.Context) ([]protocol.Database, error) { return nil, nil }
+func sqlClients(context.Context) ([]protocol.DatabaseClient, bool, error) {
+	return nil, false, nil
+}
+
+// NewSiteResolver: IIS exists on Windows only (M42).
+func NewSiteResolver(*slog.Logger) func(int32, string) string { return nil }
 
 // nginxSites reads /etc/nginx/nginx.conf and its includes. found=false when
 // nginx is not installed.

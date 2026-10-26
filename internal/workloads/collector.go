@@ -17,6 +17,7 @@ import (
 type Collector struct {
 	web      bool // IIS on Windows; nginx and Apache on Linux
 	mssql    bool
+	clients  bool // SQL Server database clients (M42)
 	postgres bool
 	mysql    bool
 	docker   bool
@@ -35,6 +36,7 @@ func New(c *config.Collectors, log *slog.Logger) *Collector {
 	col := &Collector{
 		web:      c.WebServersEnabled(),
 		mssql:    c.SQLServerEnabled() && onWindows,
+		clients:  c.SQLServerClientsEnabled() && onWindows,
 		postgres: c.PostgreSQLEnabled() && onLinux,
 		mysql:    c.MySQLEnabled() && onLinux,
 		docker:   c.DockerEnabled() && onLinux,
@@ -152,6 +154,33 @@ func (c *Collector) containers(ctx context.Context) *[]protocol.Container {
 		return nil
 	}
 	return &list // never nil: toContainers returns []
+}
+
+// DatabaseClients (M42): who has sessions open to the local SQL Server
+// databases right now — collected for every report, not on the workloads
+// cadence, since sessions come and go. nil when disabled, when SQL Server
+// is not installed or when the collection failed (then kept in Issues).
+func (c *Collector) DatabaseClients(ctx context.Context) *[]protocol.DatabaseClient {
+	if c == nil || !c.clients {
+		return nil
+	}
+	list, found, err := sqlClients(ctx)
+	c.issues.Record(protocol.CollectorSQLClients, err)
+	switch {
+	case err != nil:
+		c.log.Warn("SQL Server database clients not collected", "err", err)
+		return nil
+	case !found:
+		return nil
+	}
+	sortClients(list)
+	if len(list) > protocol.MaxDatabaseClients {
+		list = list[:protocol.MaxDatabaseClients]
+	}
+	if list == nil {
+		list = []protocol.DatabaseClient{} // "collected, none" must encode as [], not null
+	}
+	return &list
 }
 
 // Retry makes the next report collect again (the last result was lost).

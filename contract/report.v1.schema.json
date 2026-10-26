@@ -239,6 +239,11 @@
             ],
             "additionalProperties": false
           },
+          "site": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
           "count": {
             "type": "integer",
             "minimum": 1,
@@ -272,7 +277,7 @@
       "type": "boolean"
     },
     "issues": {
-      "maxItems": 18,
+      "maxItems": 19,
       "type": "array",
       "items": {
         "type": "object",
@@ -297,7 +302,8 @@
               "hyperv",
               "xenorchestra",
               "kubernetes",
-              "dns"
+              "dns",
+              "sqlserver-clients"
             ]
           },
           "error": {
@@ -333,6 +339,64 @@
             "pattern": "^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$"
           }
         ]
+      }
+    },
+    "databaseClients": {
+      "maxItems": 2000,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "engine": {
+            "type": "string",
+            "enum": [
+              "mssql"
+            ]
+          },
+          "instance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "database": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "ipv4",
+                "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$"
+              },
+              {
+                "type": "string",
+                "format": "ipv6",
+                "pattern": "^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$"
+              }
+            ]
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "sessions": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "engine",
+          "instance",
+          "database",
+          "address",
+          "port",
+          "sessions"
+        ],
+        "additionalProperties": false
       }
     },
     "inventory": {

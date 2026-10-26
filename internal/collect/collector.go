@@ -27,6 +27,13 @@ func NewCollector(version string, log *slog.Logger) *Collector {
 	return &Collector{version: version, agg: NewAggregator(time.Now().UTC()), log: log, listeners: []protocol.Listener{}}
 }
 
+// WithSites attributes IIS worker connections to their site (M42); nil-safe.
+func (c *Collector) WithSites(site SiteResolver) {
+	if site != nil {
+		c.agg.WithSites(site)
+	}
+}
+
 // Sample reads the TCP table once and folds it into the current window.
 func (c *Collector) Sample(ctx context.Context) {
 	sockets, err := Sockets(ctx)

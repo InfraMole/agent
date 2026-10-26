@@ -69,3 +69,63 @@ func TestParseApplicationHostWithoutSites(t *testing.T) {
 		t.Fatal("truncated XML should fail")
 	}
 }
+
+func TestParsePoolSites(t *testing.T) {
+	conf := `<configuration><system.applicationHost><sites>
+      <site name="Billing" id="3">
+        <application path="/" applicationPool="BillingPool" />
+        <application path="/api" />
+        <applicationDefaults applicationPool="BillingApi" />
+      </site>
+      <site name="Intranet" id="4">
+        <application path="/" />
+        <application path="/hr" applicationPool="SharedPool" />
+      </site>
+      <site name="Wiki" id="5"><application path="/" applicationPool="sharedpool" /></site>
+      <applicationDefaults applicationPool="FallbackPool" />
+    </sites></system.applicationHost></configuration>`
+	pools, err := ParsePoolSites(strings.NewReader(appHost))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if SiteOfPool(pools, "PortalPool") != "Portal" || SiteOfPool(pools, "defaultapppool") != "Default Web Site" {
+		t.Fatalf("explicit pools: %v", pools)
+	}
+	pools, err = ParsePoolSites(strings.NewReader(conf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		"BillingPool":  "Billing",
+		"BillingApi":   "Billing",  // the site's own default, declared after the application
+		"FallbackPool": "Intranet", // <sites> default, declared after every site
+		"SharedPool":   "",         // Intranet and Wiki (case-insensitive)
+		"Unknown":      "",
+	}
+	for pool, want := range cases {
+		if got := SiteOfPool(pools, pool); got != want {
+			t.Errorf("SiteOfPool(%q) = %q, want %q (%v)", pool, got, want, pools)
+		}
+	}
+}
+
+func TestParseWorkerProcesses(t *testing.T) {
+	xmlOut := []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<appcmd>
+    <WP WP.NAME="3784" APPPOOL.NAME="DefaultAppPool" />
+    <WP WP.NAME="5120" APPPOOL.NAME="BillingPool" />
+    <WP WP.NAME="x" APPPOOL.NAME="Broken" />
+</appcmd>`)
+	got := ParseWorkerProcesses(xmlOut)
+	if len(got) != 2 || got[3784] != "DefaultAppPool" || got[5120] != "BillingPool" {
+		t.Fatalf("xml: %v", got)
+	}
+	text := []byte("WP \"3784\" (applicationPool:DefaultAppPool)\r\nWP \"5120\" (applicationPool:Billing Pool)\r\n")
+	got = ParseWorkerProcesses(text)
+	if len(got) != 2 || got[5120] != "Billing Pool" {
+		t.Fatalf("text: %v", got)
+	}
+	if len(ParseWorkerProcesses(nil)) != 0 {
+		t.Fatal("empty output should give no workers")
+	}
+}

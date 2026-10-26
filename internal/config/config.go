@@ -93,13 +93,17 @@ func ClampInterval(sec int) time.Duration {
 // its own OS identity (Windows integrated auth, PostgreSQL peer, MySQL
 // unix_socket / auth_socket) — no credentials are ever stored.
 type WorkloadsCollector struct {
-	WebServers  *bool `json:"webServers,omitempty"`  // default true (IIS, nginx, Apache)
-	IIS         *bool `json:"iis,omitempty"`         // M16 name; false also turns web sites off on Windows
-	SQLServer   bool  `json:"sqlServer,omitempty"`   // default false (Windows)
-	PostgreSQL  bool  `json:"postgresql,omitempty"`  // default false (Linux)
-	MySQL       bool  `json:"mysql,omitempty"`       // default false (Linux: MySQL and MariaDB)
-	Docker      *bool `json:"docker,omitempty"`      // default true (Linux: container list from the local socket)
-	IntervalSec int   `json:"intervalSec,omitempty"` // default 3600, min 300
+	WebServers *bool `json:"webServers,omitempty"` // default true (IIS, nginx, Apache)
+	IIS        *bool `json:"iis,omitempty"`        // M16 name; false also turns web sites off on Windows
+	SQLServer  bool  `json:"sqlServer,omitempty"`  // default false (Windows)
+	// SQLServerClients (M42): which client addresses have sessions open to
+	// which database; needs VIEW SERVER STATE. Implies SQLServer (the
+	// databases are what the clients are matched to).
+	SQLServerClients bool  `json:"sqlServerClients,omitempty"` // default false (Windows)
+	PostgreSQL       bool  `json:"postgresql,omitempty"`       // default false (Linux)
+	MySQL            bool  `json:"mysql,omitempty"`            // default false (Linux: MySQL and MariaDB)
+	Docker           *bool `json:"docker,omitempty"`           // default true (Linux: container list from the local socket)
+	IntervalSec      int   `json:"intervalSec,omitempty"`      // default 3600, min 300
 }
 
 // WebServersEnabled: on unless explicitly turned off ("webServers" or, on
@@ -129,9 +133,14 @@ func (c *Collectors) DockerEnabled() bool {
 	return c == nil || c.Workloads == nil || c.Workloads.Docker == nil || *c.Workloads.Docker
 }
 
-// SQLServerEnabled: off unless explicitly turned on.
+// SQLServerEnabled: off unless explicitly turned on (also by SQLServerClients).
 func (c *Collectors) SQLServerEnabled() bool {
-	return c != nil && c.Workloads != nil && c.Workloads.SQLServer
+	return c != nil && c.Workloads != nil && (c.Workloads.SQLServer || c.Workloads.SQLServerClients)
+}
+
+// SQLServerClientsEnabled: off unless explicitly turned on (M42).
+func (c *Collectors) SQLServerClientsEnabled() bool {
+	return c != nil && c.Workloads != nil && c.Workloads.SQLServerClients
 }
 
 // WorkloadsInterval clamps the cadence to [5 min, 1 day], default 1 h.

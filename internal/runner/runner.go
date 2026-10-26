@@ -39,6 +39,9 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 		return err
 	}
 	col := collect.NewCollector(opts.Version, log)
+	if cfg.Collectors.WebServersEnabled() {
+		col.WithSites(workloads.NewSiteResolver(log)) // M42; nil without IIS
+	}
 	inv := NewInventory(cfg, log)
 	wl := &serverWorkloads{col: workloads.New(cfg.Collectors, log)}
 	sf := &serverFeatures{}
@@ -52,6 +55,7 @@ func Run(ctx context.Context, cfg *config.File, opts Options, log *slog.Logger) 
 		report := col.Build(ctx)
 		report.Inventory = inv.Due(ctx, time.Now())
 		report.Issues, report.DNSServers = nil, nil // not negotiated: an older server rejects them
+		withoutSites(&report)
 		_, err := c.Report(ctx, cfg.AgentSecret, report)
 		if err == nil {
 			log.Info("report sent")
@@ -157,10 +161,22 @@ func Sample(ctx context.Context, col *collect.Collector, window time.Duration) {
 
 // serverFeatures: optional report fields negotiated with the server.
 type serverFeatures struct {
-	issues         bool // the server accepts Report.Issues (M39)
-	issuesDisabled bool // the server rejected a report carrying them in this run
-	dns            bool // the server accepts Report.DNSServers (M39)
-	dnsDisabled    bool
+	issues          bool // the server accepts Report.Issues (M39)
+	issuesDisabled  bool // the server rejected a report carrying them in this run
+	dns             bool // the server accepts Report.DNSServers (M39)
+	dnsDisabled     bool
+	sites           bool // the server accepts Connection.Site (M42)
+	sitesDisabled   bool
+	clients         bool // the server accepts Report.DatabaseClients (M42)
+	clientsDisabled bool
+}
+
+// withoutSites drops Connection.Site for a server that does not accept it;
+// connections that differed only by site are merged by the server.
+func withoutSites(r *protocol.Report) {
+	for i := range r.Connections {
+		r.Connections[i].Site = ""
+	}
 }
 
 func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.Collector, inv *Inventory, wl *serverWorkloads, sf *serverFeatures, log *slog.Logger) (*protocol.Config, error) {
@@ -169,6 +185,17 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	report.Hypervisors = inv.DueHypervisors(ctx, time.Now(), false)
 	report.Kubernetes = inv.DueKubernetes(ctx, time.Now(), false)
 	report.Workloads = wl.due(ctx, time.Now())
+	if sf.clients && !sf.clientsDisabled {
+		report.DatabaseClients = wl.col.DatabaseClients(ctx)
+	}
+	sentSites := false
+	if !sf.sites || sf.sitesDisabled {
+		withoutSites(&report)
+	} else {
+		for _, c := range report.Connections {
+			sentSites = sentSites || c.Site != ""
+		}
+	}
 	if sf.issues && !sf.issuesDisabled {
 		report.Issues = health.Merge(report.Issues, wl.col.Issues(), inv.Issues())
 	} else {
@@ -187,6 +214,14 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 			if report.DNSServers != nil {
 				sf.dnsDisabled = true
 				log.Warn("server rejected a report with DNS servers; not sending them again until restart", "err", err)
+			}
+			if sentSites {
+				sf.sitesDisabled = true
+				log.Warn("server rejected a report with IIS sites on connections; not sending them again until restart", "err", err)
+			}
+			if report.DatabaseClients != nil {
+				sf.clientsDisabled = true
+				log.Warn("server rejected a report with database clients; not sending them again until restart", "err", err)
 			}
 		} else if !errors.Is(err, client.ErrUnauthorized) {
 			// M39: not lost — these connections go with the next report.
@@ -225,6 +260,8 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	}
 	sf.issues = hasFeature(res.Features, protocol.FeatureIssues)
 	sf.dns = hasFeature(res.Features, protocol.FeatureDNSServers)
+	sf.sites = hasFeature(res.Features, protocol.FeatureConnectionSites)
+	sf.clients = hasFeature(res.Features, protocol.FeatureDatabaseClients)
 	wl.accepted = !wl.disabled && hasFeature(res.Features, protocol.FeatureWorkloads)
 	wl.linux = hasFeature(res.Features, protocol.FeatureWorkloadsLinux)
 	wl.docker = hasFeature(res.Features, protocol.FeatureContainers)
@@ -232,7 +269,8 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	inv.negotiated(res.Features)
 	log.Info("report sent", "connections", len(report.Connections), "listeners", len(report.Listeners),
 		"services", len(report.Services), "truncated", report.Truncated, "inventory", report.Inventory != nil, "hypervisors", len(report.Hypervisors),
-		"workloads", report.Workloads != nil, "issues", len(report.Issues), "dnsServers", report.DNSServers != nil)
+		"workloads", report.Workloads != nil, "issues", len(report.Issues), "dnsServers", report.DNSServers != nil,
+		"databaseClients", report.DatabaseClients != nil)
 	return &res.Config, nil
 }
 

@@ -154,21 +154,26 @@ func cmdDryRun(args []string) error {
 			return errors.New("no usable collector in the config file (see docs/AGENT.md)")
 		}
 	}
+	// Workloads (IIS sites; SQL Server if enabled in the config), the site
+	// of IIS connections and database clients (M42) are always shown here,
+	// so you can see them before any server receives them.
+	var collectors *config.Collectors
+	if cfg, err := config.Read(f.configPath); err == nil {
+		collectors = cfg.Collectors
+	}
 	col := collect.NewCollector(version, log)
+	if collectors.WebServersEnabled() {
+		col.WithSites(workloads.NewSiteResolver(log))
+	}
 	fmt.Fprintf(os.Stderr, "Sampling for %s (nothing is sent to InfraMole)…\n", f.window)
 	runner.Sample(ctx, col, f.window)
 	report := col.Build(ctx)
 	report.Inventory = inv.Due(ctx, time.Now())
 	report.Hypervisors = inv.DueHypervisors(ctx, time.Now(), true)
 	report.Kubernetes = inv.DueKubernetes(ctx, time.Now(), true)
-	// Workloads (IIS sites; SQL Server if enabled in the config) are always
-	// shown here, so you can see them before any server receives them.
-	var collectors *config.Collectors
-	if cfg, err := config.Read(f.configPath); err == nil {
-		collectors = cfg.Collectors
-	}
 	wl := workloads.New(collectors, log)
 	report.Workloads = wl.Due(ctx, time.Now())
+	report.DatabaseClients = wl.DatabaseClients(ctx)
 	// What failed is shown too (a server receives it only once it accepts it).
 	report.Issues = health.Merge(report.Issues, wl.Issues(), inv.Issues())
 	enc := json.NewEncoder(os.Stdout)

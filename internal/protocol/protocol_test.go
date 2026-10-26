@@ -34,13 +34,16 @@ func GoldenReport() Report {
 		Connections: []Connection{
 			{Proto: "tcp", Direction: "outbound", RemoteAddress: "10.0.0.40", RemotePort: 1433,
 				Process: &ProcessRef{Name: "w3wp.exe", Path: `C:\Windows\System32\inetsrv\w3wp.exe`},
-				Count:   10, FirstSeen: t0, LastSeen: t0.Add(270 * time.Second)},
+				Site:    "Portal", Count: 10, FirstSeen: t0, LastSeen: t0.Add(270 * time.Second)},
 			{Proto: "tcp", Direction: "inbound", LocalPort: 443, RemoteAddress: "10.0.1.5",
 				Count: 3, FirstSeen: t0, LastSeen: t0.Add(60 * time.Second)},
 		},
 		Truncated:  true,
 		Issues:     []Issue{{Collector: CollectorServices, Error: IssueAccessDenied}},
 		DNSServers: &[]string{"10.0.0.53", "2001:db8::53"},
+		DatabaseClients: &[]DatabaseClient{
+			{Engine: "mssql", Instance: "MSSQLSERVER", Database: "Customers", Address: "10.0.0.23", Port: 1433, Sessions: 4},
+		},
 		Inventory: &Inventory{
 			Source: "proxmox", CollectedAt: t0.Add(5 * time.Minute),
 			Items: []InventoryItem{

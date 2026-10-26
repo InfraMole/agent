@@ -132,3 +132,36 @@ func TestAggregatorRestoreRespectsTheLimit(t *testing.T) {
 		t.Fatalf("over the limit: want 1 connection and truncated, got %d / %v", len(conns), truncated)
 	}
 }
+
+func TestAggregatorKeepsSitesApart(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := NewAggregator(t0)
+	workers := resolver(map[int32]string{10: "w3wp.exe", 11: "w3wp.exe", 12: "w3wp.exe"})
+	a.WithSites(func(pid int32, name string) string {
+		return map[int32]string{10: "Billing", 11: "Portal"}[pid] // 12: shared pool
+	})
+	sql := func(pid int32, port uint32) Socket {
+		return Socket{LocalIP: "10.0.0.23", LocalPort: port, RemoteIP: "10.0.0.40", RemotePort: 1433, Status: "ESTABLISHED", PID: pid}
+	}
+	a.Add([]Socket{sql(10, 50001), sql(11, 50002), sql(12, 50003), sql(10, 50004)}, workers, t0)
+	conns, start, _ := a.Flush(t0.Add(time.Minute))
+	sites := map[string]int{}
+	for _, c := range conns {
+		sites[c.Site] = c.Count
+	}
+	if len(conns) != 3 || sites["Billing"] != 2 || sites["Portal"] != 1 || sites[""] != 1 {
+		t.Fatalf("want Billing×2, Portal, and one without a site; got %+v", conns)
+	}
+	// A failed report comes back under the same keys.
+	a.Restore(conns, start, false)
+	a.Add([]Socket{sql(10, 50005)}, workers, t0.Add(2*time.Minute))
+	again, _, _ := a.Flush(t0.Add(3 * time.Minute))
+	if len(again) != 3 {
+		t.Fatalf("restore split or merged sites: %+v", again)
+	}
+	for _, c := range again {
+		if c.Site == "Billing" && c.Count != 3 {
+			t.Fatalf("Billing should count 3, got %d", c.Count)
+		}
+	}
+}

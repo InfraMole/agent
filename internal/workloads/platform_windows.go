@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ import (
 	_ "github.com/microsoft/go-mssqldb/sharedmemory"
 	"golang.org/x/sys/windows/registry"
 
+	"github.com/InfraMole/agent/internal/health"
 	"github.com/InfraMole/agent/internal/protocol"
 )
 
@@ -72,6 +75,36 @@ func iisSites() ([]protocol.WebSite, bool, error) {
 		}
 	}
 	return sites, true, nil
+}
+
+// NewSiteResolver attributes IIS worker processes to their site (M42):
+// `appcmd list wp` gives each worker's application pool, applicationHost.config
+// the sites of each pool. Nil when IIS is not installed.
+func NewSiteResolver(log *slog.Logger) func(int32, string) string {
+	inetsrv := filepath.Join(os.Getenv("windir"), "System32", "inetsrv")
+	appcmd := filepath.Join(inetsrv, "appcmd.exe")
+	if _, err := os.Stat(appcmd); err != nil {
+		return nil
+	}
+	r := &siteResolver{now: time.Now, log: log, list: func() (map[int32]string, map[string][]string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, appcmd, "list", "wp", "/xml").Output()
+		if err != nil {
+			return nil, nil, fmt.Errorf("appcmd list wp: %w", err)
+		}
+		f, err := os.Open(filepath.Join(inetsrv, "config", "applicationHost.config"))
+		if err != nil {
+			return nil, nil, err
+		}
+		defer f.Close()
+		pools, err := ParsePoolSites(f)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read applicationHost.config: %w", err)
+		}
+		return ParseWorkerProcesses(out), pools, nil
+	}}
+	return r.resolve
 }
 
 // expandWinEnv turns IIS's %SystemDrive%-style variables into $VAR for os.ExpandEnv.
@@ -135,6 +168,12 @@ func sqlInstances() ([]string, error) {
 }
 
 func databaseNames(ctx context.Context, instance string) ([]string, error) {
+	return listDatabases(ctx, instanceDSN(instance))
+}
+
+// instanceDSN: a local connection to one instance with the service's own
+// Windows identity.
+func instanceDSN(instance string) string {
 	host := "localhost"
 	q := url.Values{}
 	q.Set("database", "master")
@@ -149,10 +188,85 @@ func databaseNames(ctx context.Context, instance string) ([]string, error) {
 	if !strings.EqualFold(instance, "MSSQLSERVER") {
 		u.Path = instance
 	}
-	return listDatabases(ctx, u.String())
+	return u.String()
 }
 
-// listDatabases runs the one query the agent ever sends to SQL Server.
+// sqlClients (M42): per local instance, the remote clients with sessions
+// open to user databases. found=false when SQL Server is not installed.
+func sqlClients(ctx context.Context) ([]protocol.DatabaseClient, bool, error) {
+	instances, err := sqlInstances()
+	if err != nil || len(instances) == 0 {
+		return nil, false, err
+	}
+	var out []protocol.DatabaseClient
+	var errs []error
+	for _, inst := range instances {
+		rows, err := listClients(ctx, instanceDSN(inst))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("instance %s: %w", inst, err))
+			continue
+		}
+		out = append(out, toClients("mssql", inst, rows)...)
+	}
+	// Report what we could read; fail only when no instance answered.
+	if len(errs) > 0 && len(errs) == len(instances) {
+		return nil, true, errors.Join(errs...)
+	}
+	return out, true, nil
+}
+
+// The permission check and the one query behind database clients (M42).
+// Without VIEW SERVER STATE (or, from SQL Server 2022, VIEW SERVER
+// PERFORMANCE STATE) the session list shows only the agent's own session,
+// which would read as "nobody uses these databases".
+const (
+	clientsPermission     = `SELECT HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE')`
+	clientsPermission2022 = `SELECT HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER PERFORMANCE STATE')`
+	clientsQuery          = `SELECT d.name, c.client_net_address, c.local_tcp_port, COUNT(DISTINCT s.session_id)
+FROM sys.dm_exec_sessions AS s
+JOIN sys.dm_exec_connections AS c ON c.session_id = s.session_id
+JOIN sys.databases AS d ON d.database_id = s.database_id
+WHERE s.is_user_process = 1 AND s.session_id <> @@SPID AND s.database_id > 4
+  AND c.net_transport = 'TCP' AND c.local_tcp_port IS NOT NULL
+GROUP BY d.name, c.client_net_address, c.local_tcp_port`
+)
+
+func listClients(ctx context.Context, dsn string) ([]clientRow, error) {
+	connector, err := mssql.NewConnector(dsn)
+	if err != nil {
+		return nil, err
+	}
+	db := sql.OpenDB(connector)
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if !hasPermission(ctx, db, clientsPermission) && !hasPermission(ctx, db, clientsPermission2022) {
+		return nil, fmt.Errorf("VIEW SERVER STATE not granted: %w", health.ErrAccessDenied)
+	}
+	rows, err := db.QueryContext(ctx, clientsQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []clientRow
+	for rows.Next() {
+		var r clientRow
+		if err := rows.Scan(&r.database, &r.address, &r.port, &r.sessions); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// hasPermission: a NULL answer (a permission this version does not know)
+// or an error counts as not granted.
+func hasPermission(ctx context.Context, db *sql.DB, query string) bool {
+	var granted sql.NullInt64
+	return db.QueryRowContext(ctx, query).Scan(&granted) == nil && granted.Valid && granted.Int64 == 1
+}
+
+// listDatabases runs the query behind database names.
 func listDatabases(ctx context.Context, dsn string) ([]string, error) {
 	connector, err := mssql.NewConnector(dsn)
 	if err != nil {

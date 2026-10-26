@@ -24,6 +24,8 @@ const (
 	MaxIISSites        = 200
 	MaxBindingsPerSite = 20
 	MaxSQLDatabases    = 500
+	MaxDatabaseClients = 2000
+	MaxSessions        = 100_000
 	MaxProcessPathLen  = 1024
 	MaxShortStringLen  = 256
 	MinReportInterval  = 60
@@ -89,6 +91,13 @@ const FeatureIssues = "collection-issues"
 // FeatureDNSServers: the server accepts Report.DNSServers (M39).
 const FeatureDNSServers = "dns-servers"
 
+// FeatureConnectionSites: the server accepts Connection.Site (M42).
+const FeatureConnectionSites = "connection-sites"
+
+// FeatureDatabaseClients: the server accepts Report.DatabaseClients and the
+// collector name "sqlserver-clients" in issues (M42).
+const FeatureDatabaseClients = "database-clients"
+
 // Collector names for Issue.Collector (M39), mirrored from the zod enum
 // AGENT_COLLECTORS. A name the server does not know gets the report rejected.
 const (
@@ -110,6 +119,8 @@ const (
 	CollectorXenOrchestra = "xenorchestra"
 	CollectorKubernetes   = "kubernetes"
 	CollectorDNS          = "dns"
+	// CollectorSQLClients needs FeatureDatabaseClients (M42).
+	CollectorSQLClients = "sqlserver-clients"
 )
 
 // Issue categories (M39), mirrored from the zod enum COLLECTION_ERRORS.
@@ -146,11 +157,26 @@ type Report struct {
 	Issues        []Issue      `json:"issues,omitempty"`
 	// DNSServers (M39, FeatureDNSServers): configured resolvers. nil = not
 	// collected; an empty list = none configured.
-	DNSServers  *[]string    `json:"dnsServers,omitempty"`
-	Inventory   *Inventory   `json:"inventory,omitempty"`
-	Hypervisors []Hypervisor `json:"hypervisors,omitempty"`
-	Kubernetes  *Kubernetes  `json:"kubernetes,omitempty"`
-	Workloads   *Workloads   `json:"workloads,omitempty"`
+	DNSServers *[]string `json:"dnsServers,omitempty"`
+	// DatabaseClients (M42, FeatureDatabaseClients): nil = not collected; an
+	// empty list = no remote client sessions.
+	DatabaseClients *[]DatabaseClient `json:"databaseClients,omitempty"`
+	Inventory       *Inventory        `json:"inventory,omitempty"`
+	Hypervisors     []Hypervisor      `json:"hypervisors,omitempty"`
+	Kubernetes      *Kubernetes       `json:"kubernetes,omitempty"`
+	Workloads       *Workloads        `json:"workloads,omitempty"`
+}
+
+// DatabaseClient (M42): remote clients with sessions open to one user
+// database, from the engine's session list. Never logins, client host or
+// program names, or statements.
+type DatabaseClient struct {
+	Engine   string `json:"engine"` // "mssql"
+	Instance string `json:"instance"`
+	Database string `json:"database"`
+	Address  string `json:"address"`
+	Port     int    `json:"port"`
+	Sessions int    `json:"sessions"`
 }
 
 // Kubernetes (M25): nodes and workloads of one cluster. Labels, env,
@@ -357,9 +383,12 @@ type Connection struct {
 	RemoteAddress string      `json:"remoteAddress"`
 	RemotePort    uint32      `json:"remotePort"` // 0 for inbound (ephemeral)
 	Process       *ProcessRef `json:"process,omitempty"`
-	Count         int         `json:"count"`
-	FirstSeen     time.Time   `json:"firstSeen"`
-	LastSeen      time.Time   `json:"lastSeen"`
+	// Site (M42, FeatureConnectionSites): the IIS site the process serves,
+	// only when its application pool serves exactly one site.
+	Site      string    `json:"site,omitempty"`
+	Count     int       `json:"count"`
+	FirstSeen time.Time `json:"firstSeen"`
+	LastSeen  time.Time `json:"lastSeen"`
 }
 
 // ClampConfig applies the same bounds as the server; server-provided config

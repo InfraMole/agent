@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Package workloads reports what runs on a Windows host (M16): IIS sites and,
 // when enabled locally, SQL Server database names. Names and bindings only —
-// never paths, application pools, connection strings or credentials.
+// never paths, connection strings or credentials. Application pool names
+// are read only to tell which site a worker process serves (M42) and never
+// leave the host.
 package workloads
 
 import (
@@ -66,6 +68,136 @@ func ParseApplicationHost(r io.Reader) ([]protocol.WebSite, error) {
 		}
 	}
 	return sites, nil
+}
+
+// ParsePoolSites maps each application pool (lower-cased) to the sites
+// whose applications run in it, from the same <sites> section (M42). An
+// application without its own pool uses its site's <applicationDefaults>,
+// else the one of <sites>, else IIS's DefaultAppPool. Nothing but site
+// names, application pools and the defaults is decoded.
+func ParsePoolSites(r io.Reader) (map[string][]string, error) {
+	dec := xml.NewDecoder(r)
+	dec.Strict = false
+	type site struct {
+		name, defaultPool string
+		pools             []string
+		inherits          bool // an application without its own pool
+	}
+	var (
+		path        []string
+		sites       []*site
+		cur         *site
+		globalPool  string
+		inSitesPath = func() bool {
+			n := len(path)
+			return n >= 3 && path[n-3] == "configuration" && path[n-2] == "system.applicationHost" && path[n-1] == "sites"
+		}
+	)
+	for {
+		tok, err := dec.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			name := t.Name.Local
+			switch {
+			case name == "site" && inSitesPath():
+				cur = nil
+				if n := attr(t, "name"); n != "" {
+					cur = &site{name: clip(n, 256)}
+					sites = append(sites, cur)
+				}
+			case name == "applicationDefaults" && inSitesPath():
+				globalPool = attr(t, "applicationPool")
+			case name == "applicationDefaults" && cur != nil && path[len(path)-1] == "site":
+				cur.defaultPool = attr(t, "applicationPool")
+			case name == "application" && cur != nil && path[len(path)-1] == "site":
+				if pool := attr(t, "applicationPool"); pool != "" {
+					cur.pools = append(cur.pools, pool)
+				} else {
+					cur.inherits = true
+				}
+			}
+			path = append(path, name)
+		case xml.EndElement:
+			if len(path) > 0 {
+				if path[len(path)-1] == "site" {
+					cur = nil
+				}
+				path = path[:len(path)-1]
+			}
+		}
+	}
+	if globalPool == "" {
+		globalPool = "DefaultAppPool"
+	}
+	out := map[string][]string{}
+	for _, s := range sites {
+		pools := s.pools
+		if s.inherits {
+			if s.defaultPool != "" {
+				pools = append(pools, s.defaultPool)
+			} else {
+				pools = append(pools, globalPool)
+			}
+		}
+		seen := map[string]bool{}
+		for _, p := range pools {
+			key := strings.ToLower(p)
+			if !seen[key] {
+				seen[key] = true
+				out[key] = append(out[key], s.name)
+			}
+		}
+	}
+	return out, nil
+}
+
+// ParseWorkerProcesses reads `appcmd list wp /xml` (M42): worker process
+// id → application pool. The plain-text form (`WP "1234"
+// (applicationPool:Pool)`) is accepted too.
+func ParseWorkerProcesses(out []byte) map[int32]string {
+	workers := map[int32]string{}
+	var doc struct {
+		WPs []struct {
+			PID  string `xml:"WP.NAME,attr"`
+			Pool string `xml:"APPPOOL.NAME,attr"`
+		} `xml:"WP"`
+	}
+	if err := xml.Unmarshal(out, &doc); err == nil {
+		for _, wp := range doc.WPs {
+			if pid, err := strconv.ParseInt(wp.PID, 10, 32); err == nil && wp.Pool != "" {
+				workers[int32(pid)] = wp.Pool
+			}
+		}
+		return workers
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		rest, ok := strings.CutPrefix(line, `WP "`)
+		if !ok {
+			continue
+		}
+		id, rest, ok := strings.Cut(rest, `"`)
+		_, pool, found := strings.Cut(rest, "(applicationPool:")
+		pool, _, closed := strings.Cut(pool, ")")
+		if pid, err := strconv.ParseInt(id, 10, 32); ok && found && closed && err == nil && pool != "" {
+			workers[int32(pid)] = pool
+		}
+	}
+	return workers
+}
+
+// SiteOfPool: the one site served by a pool, "" when none or several.
+func SiteOfPool(poolSites map[string][]string, pool string) string {
+	if sites := poolSites[strings.ToLower(pool)]; len(sites) == 1 {
+		return sites[0]
+	}
+	return ""
 }
 
 // parseBinding: bindingInformation is "ip:port:host" ("*:443:portal.corp.local",
