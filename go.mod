@@ -1,6 +1,6 @@
 module github.com/InfraMole/agent
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/kardianos/service v1.3.0

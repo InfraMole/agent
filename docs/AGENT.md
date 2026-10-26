@@ -1,10 +1,9 @@
 # Discovery Agent
 
-Status: **prototype implemented (M5)** in [`/agent`](../agent). Verified on
-Windows 11 (non-admin, foreground) and Linux (Alpine container): dry-run,
-enroll, report, revocation. **Not yet verified**: running as an installed
-Windows service / systemd unit (needs an elevated session), code signing,
-self-update.
+Status: **implemented** in [`/agent`](../agent) (M5 onwards): dry-run,
+enroll, report, revocation, Windows service and systemd unit (§8b), signed
+self-update (§6e, M22) and signed release manifests (§10). Collectors added
+by later milestones are marked in the sections below.
 
 ## 1. Goals
 
@@ -428,7 +427,10 @@ Logs: stderr (foreground) or the OS service log (Event Log / journal).
 ## 8. Privileges
 
 Admin/root is recommended only because the OS requires it to map every socket
-to its process. The agent writes nothing outside its config directory.
+to its process. In normal operation the agent writes only to its config
+directory. `install` / `uninstall` (run by an administrator) also register
+or remove the service and copy the binary; self-update, when enabled
+locally (§6e), replaces the binary next to itself after verifying it.
 Future: Linux capabilities instead of root.
 
 ### 8b. Service install verified (2026-09-29)
@@ -449,7 +451,6 @@ Future: Linux capabilities instead of root.
 
 ## 9. Not yet done
 
-- Self-update (needs a signed manifest; ADR first).
 - Persisting a failed report window across agent restarts (M39 keeps it in
   memory only).
 

@@ -4,6 +4,13 @@ What changed in each release of `inframole-agent`. Every release is signed:
 see the README, "Releases and verification". The agent is read-only and
 outbound-only in every version — the server cannot send it commands.
 
+## 0.8.1 — 2026-10-26
+
+### Security
+
+- Built with Go 1.27.3, which fixes vulnerabilities in Go's standard
+  library (HTTP/2 client, certificate verification).
+
 ## 0.8.0 — 2026-10-26
 
 ### Added
