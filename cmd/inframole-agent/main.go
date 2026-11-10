@@ -173,7 +173,7 @@ func cmdDryRun(args []string) error {
 	report.Kubernetes = inv.DueKubernetes(ctx, time.Now(), true)
 	wl := workloads.New(collectors, log)
 	report.Workloads = wl.Due(ctx, time.Now())
-	report.DatabaseClients = wl.DatabaseClients(ctx)
+	report.DatabaseClients = wl.DatabaseClients(ctx, true)
 	// What failed is shown too (a server receives it only once it accepts it).
 	report.Issues = health.Merge(report.Issues, wl.Issues(), inv.Issues())
 	enc := json.NewEncoder(os.Stdout)

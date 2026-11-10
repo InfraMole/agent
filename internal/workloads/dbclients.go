@@ -51,6 +51,9 @@ func toClients(engine, instance string, rows []clientRow) []protocol.DatabaseCli
 func sortClients(list []protocol.DatabaseClient) {
 	sort.Slice(list, func(i, j int) bool {
 		a, b := list[i], list[j]
+		if a.Engine != b.Engine {
+			return a.Engine < b.Engine
+		}
 		if a.Instance != b.Instance {
 			return a.Instance < b.Instance
 		}

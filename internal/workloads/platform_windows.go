@@ -42,6 +42,10 @@ func postgresDatabases(context.Context) ([]protocol.Database, bool, error) {
 	return nil, false, nil
 }
 func mysqlDatabases(context.Context) ([]protocol.Database, bool, error) { return nil, false, nil }
+func postgresClients(context.Context) ([]protocol.DatabaseClient, bool, error) {
+	return nil, false, nil
+}
+func mysqlClients(context.Context) ([]protocol.DatabaseClient, bool, error) { return nil, false, nil }
 
 // iisSites reads %windir%\System32\inetsrv\config\applicationHost.config.
 // found=false when IIS is not installed.

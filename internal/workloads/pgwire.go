@@ -20,6 +20,21 @@ var ErrPasswordRequired = fmt.Errorf("%w: the server asked for a password; allow
 // already-open local socket: startup as `user` (peer authentication), one
 // simple query for database names, terminate. Nothing else is ever sent.
 func pgListDatabases(conn io.ReadWriter, user string) ([]string, error) {
+	results, err := pgQuery(conn, user, "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY 1")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, row := range results[0] {
+		names = append(names, row[0])
+	}
+	return names, nil
+}
+
+// pgQuery logs in as `user` (peer authentication: any password request is
+// refused), runs each query in turn with the simple query protocol and
+// terminates. One result per query: rows of text columns, NULL as "".
+func pgQuery(conn io.ReadWriter, user string, queries ...string) ([][][]string, error) {
 	w := bufio.NewWriter(conn)
 	r := bufio.NewReader(conn)
 
@@ -42,9 +57,7 @@ func pgListDatabases(conn io.ReadWriter, user string) ([]string, error) {
 		return nil, err
 	}
 
-	const query = "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY 1"
-	sent := false
-	var names []string
+	results := make([][][]string, 0, len(queries))
 	for {
 		typ, body, err := pgRead(r)
 		if err != nil {
@@ -60,13 +73,13 @@ func pgListDatabases(conn io.ReadWriter, user string) ([]string, error) {
 			}
 		case 'E':
 			return nil, fmt.Errorf("postgres: %s", pgError(body))
-		case 'Z': // ReadyForQuery
-			if sent {
+		case 'Z': // ReadyForQuery: send the next query, or finish
+			if len(results) == len(queries) {
 				_, _ = w.Write([]byte{'X', 0, 0, 0, 4}) // Terminate
 				_ = w.Flush()
-				return names, nil
+				return results, nil
 			}
-			q := append([]byte(query), 0)
+			q := append([]byte(queries[len(results)]), 0)
 			hdr := []byte{'Q', 0, 0, 0, 0}
 			binary.BigEndian.PutUint32(hdr[1:], uint32(4+len(q)))
 			if _, err := w.Write(append(hdr, q...)); err != nil {
@@ -75,19 +88,46 @@ func pgListDatabases(conn io.ReadWriter, user string) ([]string, error) {
 			if err := w.Flush(); err != nil {
 				return nil, err
 			}
-			sent = true
-		case 'D': // DataRow: int16 columns, then int32 length + bytes
-			if len(body) < 6 {
-				return nil, errors.New("postgres: short data row")
+			results = append(results, [][]string{})
+		case 'D': // DataRow: int16 columns, then per column int32 length (-1 = NULL) + bytes
+			if len(results) == 0 {
+				return nil, errors.New("postgres: data before a query")
 			}
-			n := int(int32(binary.BigEndian.Uint32(body[2:])))
-			if n >= 0 && 6+n <= len(body) {
-				names = append(names, string(body[6:6+n]))
+			row, err := pgParseRow(body)
+			if err != nil {
+				return nil, err
 			}
+			results[len(results)-1] = append(results[len(results)-1], row)
 		}
 		// 'S' ParameterStatus, 'K' BackendKeyData, 'T' RowDescription,
 		// 'C' CommandComplete, 'N' NoticeResponse: nothing to do.
 	}
+}
+
+func pgParseRow(body []byte) ([]string, error) {
+	if len(body) < 2 {
+		return nil, errors.New("postgres: short data row")
+	}
+	cols := int(binary.BigEndian.Uint16(body))
+	row := make([]string, 0, cols)
+	i := 2
+	for range cols {
+		if i+4 > len(body) {
+			return nil, errors.New("postgres: short data row")
+		}
+		n := int(int32(binary.BigEndian.Uint32(body[i:])))
+		i += 4
+		if n < 0 {
+			row = append(row, "")
+			continue
+		}
+		if i+n > len(body) {
+			return nil, errors.New("postgres: short data row")
+		}
+		row = append(row, string(body[i:i+n]))
+		i += n
+	}
+	return row, nil
 }
 
 func pgRead(r *bufio.Reader) (byte, []byte, error) {

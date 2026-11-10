@@ -112,7 +112,8 @@ the collectors that failed — `{collector, error}` with `collector` from
 `AGENT_COLLECTORS` (sockets, host, interfaces, services, iis, nginx, apache,
 haproxy, sqlserver, postgresql, mysql, docker, proxmox, vcenter, hyperv,
 xenorchestra, kubernetes, dns; `sqlserver-clients` only with the feature
-`"database-clients"`) and `error` one of `access-denied`,
+`"database-clients"`, `postgresql-clients` / `mysql-clients` only with
+`"database-clients-linux"`) and `error` one of `access-denied`,
 `timeout`, `unreachable`, `failed` (`internal/health.Classify`; wrap
 `health.ErrAccessDenied` for rejected credentials). Never the error text:
 it can carry paths, host or user names. Host collectors (and a failed
@@ -147,6 +148,12 @@ collected with **every report** (not on the workloads cadence) when
 installed, or the collection failed — then a `sqlserver-clients` issue);
 `[]` = no remote clients. Never logins, `host_name`, `program_name` or
 statements. At most 2000 rows, sessions capped at 100000.
+**M45** (feature `"database-clients-linux"`, ADR-061): engines
+`"postgresql"` (instance = the cluster's port) and `"mysql"` (instance
+`"default"`), when `postgresqlClients` / `mysqlClients` are on; collected
+only after the server listed the feature. One engine failing leaves the
+others in (and records its `*-clients` issue); absent only when no engine
+was collected.
 → `202 { "config": {…} }` · `401` (unknown/revoked → the agent stops
 reporting) · `413` · `415` · `422` (invalid or unsupported schema version) ·
 `429` (agent waits `Retry-After`).
@@ -357,6 +364,23 @@ PERFORMANCE STATE` for 2022; NULL / error = not granted →
   2022 in Docker (`go test -tags mssqllive -run Clients`): refused without
   the permission, another session listed with either permission; on a real
   Windows SQL Server still to check (field check).
+- **Database clients on Linux ✅ M45** (opt-in `"postgresqlClients"` /
+  `"mysqlClients"`, each implies its database collector;
+  `workloads/dbclients_linux_engines.go`, platform-neutral so the scripted
+  servers in `dbclients_engines_test.go` run everywhere). Same M20 login
+  (`pgQuery` / `mysqlLogin` + `query`: peer / socket auth, any password
+  request refused). PostgreSQL, per cluster socket:
+  `pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')` (not `t` →
+  `health.ErrAccessDenied`), then `pg_stat_activity` client backends with a
+  `client_addr`, grouped by database and `host(client_addr)`, excluding
+  the agent's backend; port = the socket's. MySQL / MariaDB: `@@performance_schema,
+@@port`; when on, `socket_instances` (`client_connection`) ⋈ `threads`
+  for exact IPs; refused or off → `PROCESS` checked in
+  `USER_PRIVILEGES` for `CURRENT_USER()` (none → access denied), then
+  `PROCESSLIST` rows whose `HOST` is an IP literal (`processlistAddress`;
+  names are never resolved). System databases dropped on the agent.
+  Verified in Docker against PostgreSQL 17, MySQL 8.4 (both paths) and
+  MariaDB 11.8, each refused without the permission.
 
 ### 6d. Linux workloads ✅ M20 (ADR-031)
 

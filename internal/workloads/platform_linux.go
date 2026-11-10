@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,16 +70,7 @@ func webConfig(parse func(fs.FS, string) ([]protocol.WebSite, error), candidates
 // port) for its database names, logging in as the agent's OS user with peer
 // authentication. found=false when no PostgreSQL socket exists.
 func postgresDatabases(ctx context.Context) ([]protocol.Database, bool, error) {
-	var sockets []string
-	for _, dir := range []string{"/var/run/postgresql", "/run/postgresql", "/tmp"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, ".s.PGSQL.*"))
-		for _, m := range matches {
-			if !strings.HasSuffix(m, ".lock") {
-				sockets = append(sockets, m)
-			}
-		}
-	}
-	sockets = uniqueTargets(sockets)
+	sockets := postgresSockets()
 	if len(sockets) == 0 {
 		return nil, false, nil
 	}
@@ -111,13 +103,7 @@ func postgresDatabases(ctx context.Context) ([]protocol.Database, bool, error) {
 // names, logging in as the agent's OS user with socket authentication.
 // found=false when no socket exists.
 func mysqlDatabases(ctx context.Context) ([]protocol.Database, bool, error) {
-	var sockets []string
-	for _, s := range []string{"/run/mysqld/mysqld.sock", "/var/run/mysqld/mysqld.sock", "/var/lib/mysql/mysql.sock", "/tmp/mysql.sock"} {
-		if fi, err := os.Stat(s); err == nil && fi.Mode()&os.ModeSocket != 0 {
-			sockets = append(sockets, s)
-		}
-	}
-	sockets = uniqueTargets(sockets)
+	sockets := mysqlSockets()
 	if len(sockets) == 0 {
 		return nil, false, nil
 	}
@@ -138,15 +124,86 @@ func mysqlDatabases(ctx context.Context) ([]protocol.Database, bool, error) {
 	return out, true, nil
 }
 
-// System databases are never reported (data minimisation; the server
-// filters them too).
-var (
-	pgSystem    = map[string]bool{"postgres": true, "template0": true, "template1": true}
-	mysqlSystem = map[string]bool{"information_schema": true, "mysql": true, "performance_schema": true, "sys": true}
-)
+// postgresSockets: one Unix socket per local cluster (its name ends in the port).
+func postgresSockets() []string {
+	var sockets []string
+	for _, dir := range []string{"/var/run/postgresql", "/run/postgresql", "/tmp"} {
+		matches, _ := filepath.Glob(filepath.Join(dir, ".s.PGSQL.*"))
+		for _, m := range matches {
+			if !strings.HasSuffix(m, ".lock") {
+				sockets = append(sockets, m)
+			}
+		}
+	}
+	return uniqueTargets(sockets)
+}
+
+func mysqlSockets() []string {
+	var sockets []string
+	for _, s := range []string{"/run/mysqld/mysqld.sock", "/var/run/mysqld/mysqld.sock", "/var/lib/mysql/mysql.sock", "/tmp/mysql.sock"} {
+		if fi, err := os.Stat(s); err == nil && fi.Mode()&os.ModeSocket != 0 {
+			sockets = append(sockets, s)
+		}
+	}
+	return uniqueTargets(sockets)
+}
+
+// postgresClients (M45): the remote clients of every local PostgreSQL
+// cluster. found=false when no PostgreSQL socket exists.
+func postgresClients(ctx context.Context) ([]protocol.DatabaseClient, bool, error) {
+	sockets := postgresSockets()
+	if len(sockets) == 0 {
+		return nil, false, nil
+	}
+	who, err := osUser()
+	if err != nil {
+		return nil, true, err
+	}
+	var out []protocol.DatabaseClient
+	var errs []error
+	for _, sock := range sockets {
+		port, err := strconv.Atoi(sock[strings.LastIndex(sock, ".")+1:])
+		if err != nil {
+			continue
+		}
+		list, err := onSocket(ctx, sock, func(c net.Conn) ([]protocol.DatabaseClient, error) {
+			return pgSessionClients(c, who, port)
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("port %d: %w", port, err))
+			continue
+		}
+		out = append(out, list...)
+	}
+	// Report what we could read; fail only when no cluster answered.
+	if len(errs) > 0 && len(errs) == len(sockets) {
+		return nil, true, errors.Join(errs...)
+	}
+	return out, true, nil
+}
+
+// mysqlClients (M45): the remote clients of the local MySQL / MariaDB
+// server. found=false when no socket exists.
+func mysqlClients(ctx context.Context) ([]protocol.DatabaseClient, bool, error) {
+	sockets := mysqlSockets()
+	if len(sockets) == 0 {
+		return nil, false, nil
+	}
+	who, err := osUser()
+	if err != nil {
+		return nil, true, err
+	}
+	list, err := onSocket(ctx, sockets[0], func(c net.Conn) ([]protocol.DatabaseClient, error) {
+		return mySessionClients(c, who)
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	return list, true, nil
+}
 
 // onSocket dials a local Unix socket with a deadline and runs one exchange.
-func onSocket(ctx context.Context, path string, fn func(net.Conn) ([]string, error)) ([]string, error) {
+func onSocket[T any](ctx context.Context, path string, fn func(net.Conn) ([]T, error)) ([]T, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	var d net.Dialer

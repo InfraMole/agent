@@ -4,6 +4,20 @@ What changed in each release of `inframole-agent`. Every release is signed:
 see the README, "Releases and verification". The agent is read-only and
 outbound-only in every version — the server cannot send it commands.
 
+## 0.9.0 — 2026-11-10
+
+### Added
+
+- **Who uses each PostgreSQL and MySQL / MariaDB database**: off by
+  default (`postgresqlClients` / `mysqlClients`). The agent lists which
+  client addresses have sessions open to which database, from the
+  database server's own session list, with the same local socket login as
+  database names (its OS user, no password). Database, client IP, server
+  port and a count only — never user names, application names or queries.
+  Needs `pg_read_all_stats` (PostgreSQL) or `PROCESS` (MySQL / MariaDB);
+  without it the agent reports "access denied" instead of an empty list.
+  Requires InfraMole server 0.35.0.
+
 ## 0.8.1 — 2026-10-26
 
 ### Security

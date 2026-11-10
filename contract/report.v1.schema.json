@@ -277,7 +277,7 @@
       "type": "boolean"
     },
     "issues": {
-      "maxItems": 19,
+      "maxItems": 21,
       "type": "array",
       "items": {
         "type": "object",
@@ -303,7 +303,9 @@
               "xenorchestra",
               "kubernetes",
               "dns",
-              "sqlserver-clients"
+              "sqlserver-clients",
+              "postgresql-clients",
+              "mysql-clients"
             ]
           },
           "error": {
@@ -350,7 +352,9 @@
           "engine": {
             "type": "string",
             "enum": [
-              "mssql"
+              "mssql",
+              "postgresql",
+              "mysql"
             ]
           },
           "instance": {

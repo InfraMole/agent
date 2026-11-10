@@ -30,3 +30,7 @@ func sqlClients(context.Context) ([]protocol.DatabaseClient, bool, error) {
 func NewSiteResolver(*slog.Logger) func(int32, string) string              { return nil }
 func postgresDatabases(context.Context) ([]protocol.Database, bool, error) { return nil, false, nil }
 func mysqlDatabases(context.Context) ([]protocol.Database, bool, error)    { return nil, false, nil }
+func postgresClients(context.Context) ([]protocol.DatabaseClient, bool, error) {
+	return nil, false, nil
+}
+func mysqlClients(context.Context) ([]protocol.DatabaseClient, bool, error) { return nil, false, nil }

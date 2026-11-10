@@ -99,11 +99,15 @@ type WorkloadsCollector struct {
 	// SQLServerClients (M42): which client addresses have sessions open to
 	// which database; needs VIEW SERVER STATE. Implies SQLServer (the
 	// databases are what the clients are matched to).
-	SQLServerClients bool  `json:"sqlServerClients,omitempty"` // default false (Windows)
-	PostgreSQL       bool  `json:"postgresql,omitempty"`       // default false (Linux)
-	MySQL            bool  `json:"mysql,omitempty"`            // default false (Linux: MySQL and MariaDB)
-	Docker           *bool `json:"docker,omitempty"`           // default true (Linux: container list from the local socket)
-	IntervalSec      int   `json:"intervalSec,omitempty"`      // default 3600, min 300
+	SQLServerClients bool `json:"sqlServerClients,omitempty"` // default false (Windows)
+	PostgreSQL       bool `json:"postgresql,omitempty"`       // default false (Linux)
+	MySQL            bool `json:"mysql,omitempty"`            // default false (Linux: MySQL and MariaDB)
+	// PostgreSQLClients / MySQLClients (M45): the same for Linux; need
+	// pg_read_all_stats / PROCESS. Each implies its database collector.
+	PostgreSQLClients bool  `json:"postgresqlClients,omitempty"` // default false (Linux)
+	MySQLClients      bool  `json:"mysqlClients,omitempty"`      // default false (Linux)
+	Docker            *bool `json:"docker,omitempty"`            // default true (Linux: container list from the local socket)
+	IntervalSec       int   `json:"intervalSec,omitempty"`       // default 3600, min 300
 }
 
 // WebServersEnabled: on unless explicitly turned off ("webServers" or, on
@@ -120,12 +124,22 @@ func (c *Collectors) WebServersEnabled() bool {
 func (c *Collectors) IISEnabled() bool { return c.WebServersEnabled() }
 
 // PostgreSQLEnabled / MySQLEnabled: off unless explicitly turned on.
+// (also by their clients collector, M45).
 func (c *Collectors) PostgreSQLEnabled() bool {
-	return c != nil && c.Workloads != nil && c.Workloads.PostgreSQL
+	return c != nil && c.Workloads != nil && (c.Workloads.PostgreSQL || c.Workloads.PostgreSQLClients)
 }
 
 func (c *Collectors) MySQLEnabled() bool {
-	return c != nil && c.Workloads != nil && c.Workloads.MySQL
+	return c != nil && c.Workloads != nil && (c.Workloads.MySQL || c.Workloads.MySQLClients)
+}
+
+// PostgreSQLClientsEnabled / MySQLClientsEnabled: off unless explicitly turned on (M45).
+func (c *Collectors) PostgreSQLClientsEnabled() bool {
+	return c != nil && c.Workloads != nil && c.Workloads.PostgreSQLClients
+}
+
+func (c *Collectors) MySQLClientsEnabled() bool {
+	return c != nil && c.Workloads != nil && c.Workloads.MySQLClients
 }
 
 // DockerEnabled: on unless explicitly turned off (M25).

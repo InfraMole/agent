@@ -98,6 +98,11 @@ const FeatureConnectionSites = "connection-sites"
 // collector name "sqlserver-clients" in issues (M42).
 const FeatureDatabaseClients = "database-clients"
 
+// FeatureDatabaseClientsLinux: the server also accepts the engines
+// "postgresql" and "mysql" in Report.DatabaseClients and the collector names
+// "postgresql-clients" / "mysql-clients" (M45).
+const FeatureDatabaseClientsLinux = "database-clients-linux"
+
 // Collector names for Issue.Collector (M39), mirrored from the zod enum
 // AGENT_COLLECTORS. A name the server does not know gets the report rejected.
 const (
@@ -121,6 +126,9 @@ const (
 	CollectorDNS          = "dns"
 	// CollectorSQLClients needs FeatureDatabaseClients (M42).
 	CollectorSQLClients = "sqlserver-clients"
+	// CollectorPostgreSQLClients / CollectorMySQLClients need FeatureDatabaseClientsLinux (M45).
+	CollectorPostgreSQLClients = "postgresql-clients"
+	CollectorMySQLClients      = "mysql-clients"
 )
 
 // Issue categories (M39), mirrored from the zod enum COLLECTION_ERRORS.
@@ -171,7 +179,7 @@ type Report struct {
 // database, from the engine's session list. Never logins, client host or
 // program names, or statements.
 type DatabaseClient struct {
-	Engine   string `json:"engine"` // "mssql"
+	Engine   string `json:"engine"` // "mssql", "postgresql", "mysql" (M45)
 	Instance string `json:"instance"`
 	Database string `json:"database"`
 	Address  string `json:"address"`

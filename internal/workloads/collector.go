@@ -20,6 +20,8 @@ type Collector struct {
 	clients  bool // SQL Server database clients (M42)
 	postgres bool
 	mysql    bool
+	pgUsers  bool // PostgreSQL database clients (M45)
+	myUsers  bool // MySQL / MariaDB database clients (M45)
 	docker   bool
 	interval time.Duration
 	last     time.Time
@@ -39,6 +41,8 @@ func New(c *config.Collectors, log *slog.Logger) *Collector {
 		clients:  c.SQLServerClientsEnabled() && onWindows,
 		postgres: c.PostgreSQLEnabled() && onLinux,
 		mysql:    c.MySQLEnabled() && onLinux,
+		pgUsers:  c.PostgreSQLClientsEnabled() && onLinux,
+		myUsers:  c.MySQLClientsEnabled() && onLinux,
 		docker:   c.DockerEnabled() && onLinux,
 		interval: c.WorkloadsInterval(),
 		log:      log,
@@ -156,21 +160,43 @@ func (c *Collector) containers(ctx context.Context) *[]protocol.Container {
 	return &list // never nil: toContainers returns []
 }
 
-// DatabaseClients (M42): who has sessions open to the local SQL Server
-// databases right now — collected for every report, not on the workloads
-// cadence, since sessions come and go. nil when disabled, when SQL Server
-// is not installed or when the collection failed (then kept in Issues).
-func (c *Collector) DatabaseClients(ctx context.Context) *[]protocol.DatabaseClient {
-	if c == nil || !c.clients {
+// DatabaseClients (M42, M45): who has sessions open to the local SQL
+// Server, PostgreSQL and MySQL / MariaDB databases right now — collected for
+// every report, not on the workloads cadence, since sessions come and go.
+// linux: the server accepts the PostgreSQL and MySQL engines (M45). nil when
+// no engine was collected: disabled, not installed, or failed (then kept in
+// Issues); one engine failing leaves the others in.
+func (c *Collector) DatabaseClients(ctx context.Context, linux bool) *[]protocol.DatabaseClient {
+	if c == nil {
 		return nil
 	}
-	list, found, err := sqlClients(ctx)
-	c.issues.Record(protocol.CollectorSQLClients, err)
-	switch {
-	case err != nil:
-		c.log.Warn("SQL Server database clients not collected", "err", err)
-		return nil
-	case !found:
+	engines := []struct {
+		on        bool
+		collector string
+		label     string
+		collect   func(context.Context) ([]protocol.DatabaseClient, bool, error)
+	}{
+		{c.clients, protocol.CollectorSQLClients, "SQL Server", sqlClients},
+		{c.pgUsers && linux, protocol.CollectorPostgreSQLClients, "PostgreSQL", postgresClients},
+		{c.myUsers && linux, protocol.CollectorMySQLClients, "MySQL", mysqlClients},
+	}
+	var list []protocol.DatabaseClient
+	collected := false
+	for _, e := range engines {
+		if !e.on {
+			continue
+		}
+		got, found, err := e.collect(ctx)
+		c.issues.Record(e.collector, err)
+		switch {
+		case err != nil:
+			c.log.Warn(e.label+" database clients not collected", "err", err)
+		case found:
+			collected = true
+			list = append(list, got...)
+		}
+	}
+	if !collected {
 		return nil
 	}
 	sortClients(list)

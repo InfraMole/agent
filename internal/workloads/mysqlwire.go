@@ -23,6 +23,26 @@ const (
 // (auth_socket / unix_socket: the OS user is the credential, no password),
 // run SHOW DATABASES, quit. Any password-based method is refused.
 func mysqlListDatabases(conn io.ReadWriter, user string) ([]string, error) {
+	c, err := mysqlLogin(conn, user)
+	if err != nil {
+		return nil, err
+	}
+	defer c.quit()
+	rows, err := c.query("SHOW DATABASES")
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if len(row) > 0 {
+			names = append(names, row[0])
+		}
+	}
+	return names, nil
+}
+
+// mysqlLogin logs in as `user` with socket authentication only.
+func mysqlLogin(conn io.ReadWriter, user string) (*myConn, error) {
 	c := &myConn{r: bufio.NewReader(conn), w: conn}
 
 	hs, err := c.read()
@@ -57,7 +77,7 @@ func mysqlListDatabases(conn io.ReadWriter, user string) ([]string, error) {
 		}
 		switch {
 		case len(p) > 0 && p[0] == 0x00: // OK: logged in
-			return mysqlShowDatabases(c)
+			return c, nil
 		case len(p) > 0 && p[0] == 0xff:
 			// "Access denied … (using password: NO)": the account needs a password.
 			return nil, fmt.Errorf("%w (mysql: %s)", ErrPasswordRequired, myError(p))
@@ -75,9 +95,16 @@ func mysqlListDatabases(conn io.ReadWriter, user string) ([]string, error) {
 	}
 }
 
-func mysqlShowDatabases(c *myConn) ([]string, error) {
+// myServerError: the server refused a statement; the session is still usable.
+type myServerError struct{ msg string }
+
+func (e *myServerError) Error() string { return "mysql: " + e.msg }
+
+// query runs one statement (COM_QUERY, text protocol) and returns its rows
+// as text columns, NULL as "".
+func (c *myConn) query(sql string) ([][]string, error) {
 	c.seq = 0
-	if err := c.write(append([]byte{0x03}, "SHOW DATABASES"...)); err != nil {
+	if err := c.write(append([]byte{0x03}, sql...)); err != nil {
 		return nil, err
 	}
 	first, err := c.read()
@@ -85,7 +112,7 @@ func mysqlShowDatabases(c *myConn) ([]string, error) {
 		return nil, err
 	}
 	if len(first) > 0 && first[0] == 0xff {
-		return nil, fmt.Errorf("mysql: %s", myError(first))
+		return nil, &myServerError{myError(first)}
 	}
 	cols, _ := lenEncInt(first)
 	for i := uint64(0); i < cols; i++ { // column definitions
@@ -96,26 +123,39 @@ func mysqlShowDatabases(c *myConn) ([]string, error) {
 	if _, err := c.read(); err != nil { // EOF after the definitions
 		return nil, err
 	}
-	var names []string
+	var rows [][]string
 	for {
 		p, err := c.read()
 		if err != nil {
 			return nil, err
 		}
 		if len(p) > 0 && p[0] == 0xfe && len(p) < 9 { // EOF: end of rows
-			break
+			return rows, nil
 		}
 		if len(p) > 0 && p[0] == 0xff {
-			return nil, fmt.Errorf("mysql: %s", myError(p))
+			return nil, &myServerError{myError(p)}
 		}
-		n, used := lenEncInt(p)
-		if used > 0 && used+int(n) <= len(p) {
-			names = append(names, string(p[used:used+int(n)]))
+		row := make([]string, 0, cols)
+		for i := 0; uint64(len(row)) < cols && i < len(p); {
+			if p[i] == 0xfb { // NULL
+				row = append(row, "")
+				i++
+				continue
+			}
+			n, used := lenEncInt(p[i:])
+			if used == 0 || i+used+int(n) > len(p) {
+				return nil, errors.New("mysql: malformed row")
+			}
+			row = append(row, string(p[i+used:i+used+int(n)]))
+			i += used + int(n)
 		}
+		rows = append(rows, row)
 	}
+}
+
+func (c *myConn) quit() {
 	c.seq = 0
 	_ = c.write([]byte{0x01}) // COM_QUIT
-	return names, nil
 }
 
 type myConn struct {

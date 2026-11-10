@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -33,5 +34,30 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 func TestLoadMissingIsNotEnrolled(t *testing.T) {
 	if _, err := Load(filepath.Join(t.TempDir(), "nope.json")); !errors.Is(err, ErrNotEnrolled) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// The database clients collectors (M42, M45) imply their database collector.
+func TestDatabaseClientsImplyDatabases(t *testing.T) {
+	var c Collectors
+	if err := json.Unmarshal([]byte(`{"workloads":{"postgresqlClients":true,"mysqlClients":true}}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if !c.PostgreSQLEnabled() || !c.MySQLEnabled() || !c.PostgreSQLClientsEnabled() || !c.MySQLClientsEnabled() {
+		t.Fatalf("clients on must turn their databases on: %+v", c.Workloads)
+	}
+	if c.SQLServerEnabled() || c.SQLServerClientsEnabled() {
+		t.Fatal("SQL Server stays off")
+	}
+	var off *Collectors
+	if off.PostgreSQLClientsEnabled() || off.MySQLClientsEnabled() {
+		t.Fatal("off by default")
+	}
+	c = Collectors{}
+	if err := json.Unmarshal([]byte(`{"workloads":{"postgresql":true}}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if !c.PostgreSQLEnabled() || c.PostgreSQLClientsEnabled() {
+		t.Fatal("databases do not imply their clients")
 	}
 }

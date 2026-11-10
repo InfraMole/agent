@@ -168,6 +168,7 @@ type serverFeatures struct {
 	sites           bool // the server accepts Connection.Site (M42)
 	sitesDisabled   bool
 	clients         bool // the server accepts Report.DatabaseClients (M42)
+	clientsLinux    bool // … with the PostgreSQL and MySQL engines (M45)
 	clientsDisabled bool
 }
 
@@ -186,7 +187,7 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	report.Kubernetes = inv.DueKubernetes(ctx, time.Now(), false)
 	report.Workloads = wl.due(ctx, time.Now())
 	if sf.clients && !sf.clientsDisabled {
-		report.DatabaseClients = wl.col.DatabaseClients(ctx)
+		report.DatabaseClients = wl.col.DatabaseClients(ctx, sf.clientsLinux)
 	}
 	sentSites := false
 	if !sf.sites || sf.sitesDisabled {
@@ -262,6 +263,7 @@ func send(ctx context.Context, c *client.Client, cfg *config.File, col *collect.
 	sf.dns = hasFeature(res.Features, protocol.FeatureDNSServers)
 	sf.sites = hasFeature(res.Features, protocol.FeatureConnectionSites)
 	sf.clients = hasFeature(res.Features, protocol.FeatureDatabaseClients)
+	sf.clientsLinux = hasFeature(res.Features, protocol.FeatureDatabaseClientsLinux)
 	wl.accepted = !wl.disabled && hasFeature(res.Features, protocol.FeatureWorkloads)
 	wl.linux = hasFeature(res.Features, protocol.FeatureWorkloadsLinux)
 	wl.docker = hasFeature(res.Features, protocol.FeatureContainers)
